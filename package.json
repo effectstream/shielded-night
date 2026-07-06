@@ -1,0 +1,46 @@
+{
+  "name": "@zswap-da/contract-convert-vault",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./witnesses": "./src/witnesses.ts",
+    "./contract": "./src/managed/contract/index.js"
+  },
+  "scripts": {
+    "compact": "compact compile +0.31.1 src/convert-vault.compact src/managed/",
+    "compact:fast": "compact compile +0.31.1 --skip-zk src/convert-vault.compact src/managed/",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun run test:unit && bun run test:integration",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "smoke": "vitest run --config vitest.integration.config.ts -t \"\\[smoke\\]\""
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-js": "^2.5.1",
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/ledger-v8": "^8.1.0",
+    "@midnight-ntwrk/midnight-js": "^4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "^4.1.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "^4.1.1",
+    "@midnightntwrk/wallet-sdk": "^1.2.0",
+    "buffer": "^6.0.3",
+    "rxjs": "^7.8.1",
+    "ws": "^8.19.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.1",
+    "testcontainers": "^11.12.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "overrides": {
+    "//": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving.",
+    "@midnight-ntwrk/ledger-v8": "8.1.0"
+  }
+}

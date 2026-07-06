@@ -1,0 +1,365 @@
+// SPDX-License-Identifier: Apache-2.0
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+
+/**
+ * @title ConvertVault
+ * @description A hash-keyed pool that converts native unshielded NIGHT into a
+ * shielded wrapper token and back, in two single-domain steps. A depositor holds
+ * a credit balance keyed by `hash(secret)`; depositing in either value domain adds
+ * credit, withdrawing in either domain removes it:
+ *
+ *   balance[hash] = (deposited unshielded + deposited shielded, burnt)
+ *                 - (withdrawn unshielded + withdrawn shielded, minted)
+ *
+ * - Convert unshielded -> shielded: `depositUnshielded` then `withdrawShielded`.
+ * - Convert shielded -> unshielded: `depositShielded`  then `withdrawUnshielded`.
+ *
+ * The underlying is native NIGHT (minted outside this contract). The shielded side
+ * is a contract-minted wrapper token with color `tokenType(WRAP_DOMAIN, self())`.
+ * Locked NIGHT backs unshielded withdrawals; the wrapper is elastic (minted on
+ * withdraw, burnt on deposit).
+ *
+ * @notice Every circuit touches a SINGLE value domain. This is deliberate: the
+ * wallet SDK does not yet support a combined shielded<->unshielded call, so a
+ * single atomic convert would fail to balance. Splitting into two same-domain calls
+ * keeps each step compatible with today's tooling.
+ *
+ * @dev CONCURRENCY. The only mutable ledger state is the per-key `balances` Map.
+ * There are intentionally NO shared scalar fields: a `Uint` updated as `x = x + n`
+ * reads-then-writes, which pins the transaction to the value observed at build time
+ * and makes any two transactions in the same block conflict. Per-key Map entries are
+ * independent, so unrelated depositors never contend. Aggregate supply, if ever
+ * required, MUST use the CRDT-style `Counter` ledger type (which requests an
+ * increment without reading), never a `Uint`. Coin-nonce uniqueness is likewise
+ * caller-supplied (see `withdrawShielded`) rather than drawn from a shared counter.
+ */
+
+/**
+ * @description Credit balances keyed by `hash(secret)`. Only the hash is public;
+ * the secret is always a private circuit input. This is the sole mutable ledger
+ * field and it is per-key, so concurrent transactions on different secrets do not
+ * conflict.
+ * @type {Bytes<32>} balanceKey - The `hash(secret)` credit key.
+ * @type {Uint<128>} balance - The credit balance held under that key.
+ * @type {Map<balanceKey, balance>} balances
+ */
+export ledger balances: Map<Bytes<32>, Uint<128>>;
+
+/**
+ * @description The wrapper token's human-readable name.
+ * @dev Wrapper metadata follows OpenZeppelin's FungibleToken / NativeShieldedToken
+ * convention. Midnight coins carry no intrinsic name/symbol/decimals, so they are
+ * attached here. `sealed` means writable only in the constructor and immutable
+ * after; because they are never re-written, reading them is concurrency-free and
+ * off-chain tools can read them directly from ledger state.
+ * @type {Opaque<"string">} _name
+ */
+export sealed ledger _name: Opaque<"string">;
+
+/**
+ * @description The wrapper token's symbol.
+ * @type {Opaque<"string">} _symbol
+ */
+export sealed ledger _symbol: Opaque<"string">;
+
+/**
+ * @description The number of decimals used for the wrapper's user representation.
+ * @type {Uint<8>} _decimals
+ */
+export sealed ledger _decimals: Uint<8>;
+
+/**
+ * @description Returns the fixed domain separator for the shielded wrapper token.
+ * @return {Bytes<32>} - The wrapper domain separator.
+ */
+circuit wrapDomain(): Bytes<32> {
+  return pad(32, "mip12:shielded-wrapper");
+}
+
+/**
+ * @description Returns the wrapper token's on-chain color.
+ *
+ * @dev Computed live from `kernel.self()` rather than stored at construction:
+ * `kernel.self()` in a constructor is a placeholder, not the final contract
+ * address, so a constructor-time value would not match the color the mint actually
+ * produces. Off-chain callers can derive the same value from the known contract
+ * address and `wrapDomain()`.
+ *
+ * @return {Bytes<32>} - `tokenType(wrapDomain(), self())`.
+ */
+circuit wrapColor(): Bytes<32> {
+  return tokenType(wrapDomain(), kernel.self());
+}
+
+/**
+ * @description Initializes the wrapper metadata. Runs once, at deployment.
+ *
+ * @dev `decimals_` SHOULD match the underlying so the wrapper displays 1:1
+ * (native NIGHT uses 6: 1 NIGHT = 10^6 Stars).
+ *
+ * @param {Opaque<"string">} name_ - The wrapper token name.
+ * @param {Opaque<"string">} symbol_ - The wrapper token symbol.
+ * @param {Uint<8>} decimals_ - The number of decimals for user representation.
+ */
+constructor(name_: Opaque<"string">, symbol_: Opaque<"string">, decimals_: Uint<8>) {
+  _name = disclose(name_);
+  _symbol = disclose(symbol_);
+  _decimals = disclose(decimals_);
+}
+
+/**
+ * @description Returns the wrapper token name.
+ * @return {Opaque<"string">} - The token name.
+ */
+export circuit name(): Opaque<"string"> { return _name; }
+
+/**
+ * @description Returns the wrapper token symbol.
+ * @return {Opaque<"string">} - The token symbol.
+ */
+export circuit symbol(): Opaque<"string"> { return _symbol; }
+
+/**
+ * @description Returns the number of decimals used for the wrapper's user representation.
+ * @return {Uint<8>} - The token decimals.
+ */
+export circuit decimals(): Uint<8> { return _decimals; }
+
+/**
+ * @description Returns the wrapper token's on-chain color.
+ * @return {Bytes<32>} - The wrapper color, `tokenType(wrapDomain(), self())`.
+ */
+export circuit tokenColor(): Bytes<32> { return wrapColor(); }
+
+/**
+ * @description Derives the public balance key from a secret.
+ *
+ * @dev The `persistentHash` output is disclosed and used as the public map key,
+ * while the secret itself never leaves the proof. This is the intended disclosure:
+ * the hash is public, the preimage is not.
+ *
+ * @param {Bytes<32>} secret - The depositor's private secret.
+ * @return {Bytes<32>} - The public balance key `hash(secret)`.
+ */
+circuit getBalanceKey(secret: Bytes<32>): Bytes<32> {
+  return disclose(persistentHash<Vector<2, Bytes<32>>>([pad(32, "mip12:balance"), secret]));
+}
+
+/**
+ * @description Increases the credit balance under `balanceKey` by `amount`.
+ *
+ * Requirements:
+ *
+ * - `amount` is greater than zero.
+ *
+ * @param {Bytes<32>} balanceKey - The credit key to increase.
+ * @param {Uint<128>} amount - The amount to add.
+ */
+circuit creditKey(balanceKey: Bytes<32>, amount: Uint<128>): [] {
+  assert(amount > 0, "amount must be positive");
+  if (!balances.member(balanceKey)) {
+    balances.insert(balanceKey, 0 as Uint<128>);
+  }
+  balances.insert(balanceKey, (balances.lookup(balanceKey) + amount) as Uint<128>);
+}
+
+/**
+ * @description Decreases the credit balance under `balanceKey` by `amount`.
+ *
+ * Requirements:
+ *
+ * - `amount` is greater than zero.
+ * - A balance exists for `balanceKey`.
+ * - That balance is at least `amount`.
+ *
+ * @param {Bytes<32>} balanceKey - The credit key to decrease.
+ * @param {Uint<128>} amount - The amount to remove.
+ */
+circuit debitKey(balanceKey: Bytes<32>, amount: Uint<128>): [] {
+  assert(amount > 0, "amount must be positive");
+  assert(balances.member(balanceKey), "no balance for this secret");
+  const cur = balances.lookup(balanceKey);
+  assert(cur >= amount, "insufficient pool balance");
+  balances.insert(balanceKey, (cur - amount) as Uint<128>);
+}
+
+/**
+ * @description Locks `amount` of native NIGHT (unshielded) and credits the
+ * caller's balance. First half of an unshielded -> shielded conversion.
+ *
+ * @notice Pure unshielded: the caller's wallet MUST supply `amount` of native
+ * NIGHT as an unshielded input to fund the receive.
+ *
+ * Requirements:
+ *
+ * - `amount` is greater than zero.
+ *
+ * @param {Bytes<32>} secret - The depositor's secret; credits `hash(secret)`.
+ * @param {Uint<64>} amount - The amount of native NIGHT to lock and credit.
+ */
+export circuit depositUnshielded(secret: Bytes<32>, amount: Uint<64>): [] {
+  assert(amount > 0, "amount must be positive");
+  const amt = disclose(amount) as Uint<128>;
+  receiveUnshielded(nativeToken(), amt);
+  creditKey(getBalanceKey(secret), amt);
+}
+
+/**
+ * @description Burns `amount` of a wrapper coin (shielded) and credits the caller's
+ * balance by `amount`. First half of a shielded -> unshielded conversion.
+ *
+ * @notice Pure shielded. `coin` must be this vault's wrapper. `amount` is sent to the
+ * shielded burn address; the remainder (`coin.value - amount`) is returned to
+ * `refundTo` and echoed back as the return value. Because contract-sent coins carry
+ * no ciphertext, that returned `ShieldedCoinInfo` is the only recoverable copy of the
+ * change — the caller MUST retain it to spend the change later.
+ *
+ * Requirements:
+ *
+ * - `coin.value` is greater than zero.
+ * - `coin.color` is this vault's wrapper color.
+ * - `0 < amount <= coin.value`.
+ *
+ * @param {Bytes<32>} secret - The depositor's secret; credits `hash(secret)`.
+ * @param {ShieldedCoinInfo} coin - The wrapper coin to burn from.
+ * @param {Uint<128>} amount - How much of `coin` to burn and credit.
+ * @param {Either<ZswapCoinPublicKey, ContractAddress>} refundTo - Where the change goes.
+ * @return {Maybe<ShieldedCoinInfo>} - The change coin, or none if fully burned.
+ */
+circuit depositShielded_notWorking(
+  secret: Bytes<32>,
+  coin: ShieldedCoinInfo,
+  amount: Uint<128>,
+  refundTo: Either<ZswapCoinPublicKey, ContractAddress>
+): Maybe<ShieldedCoinInfo> {
+  const c = disclose(coin);
+  assert(c.value > 0, "coin value must be positive");
+  assert(c.color == wrapColor(), "not this vault's shielded wrapper");
+
+  const amt = disclose(amount);
+  assert(amt > 0, "amount must be positive");
+  assert(amt <= c.value, "amount exceeds coin value");
+
+  receiveShielded(c);
+  // BUG:
+  // sendImmediateShielded is not playing well with wallets. 
+  // Wallets are are not able to see that the utxo is spent.
+  const sendRes = sendImmediateShielded(c, shieldedBurnAddress(), amt);
+  creditKey(getBalanceKey(secret), amt);
+
+  // Return the change (unburned remainder) sent back to `refundTo`).
+  if (disclose(sendRes.change.is_some)) {
+    const refundRes = sendImmediateShielded(
+      disclose(sendRes.change.value),
+      disclose(refundTo),
+      disclose(sendRes.change.value.value)
+    );
+    return some<ShieldedCoinInfo>(refundRes.sent);
+  }
+  return none<ShieldedCoinInfo>();
+}
+
+/*
+ * This alternative version, keeps the shielded tokens in the contract, but there is no way to move them out.
+ * The wallet is in charge of sending the exact UTXO that will be locked in the contract.
+ */
+export circuit depositShielded(
+  secret: Bytes<32>,
+  coin: ShieldedCoinInfo,
+): Maybe<ShieldedCoinInfo> {
+  const c = disclose(coin);
+  assert(c.value > 0, "coin value must be positive");
+  assert(c.color == wrapColor(), "not this vault's shielded wrapper");
+  receiveShielded(c);
+  creditKey(getBalanceKey(secret), c.value);
+  return none<ShieldedCoinInfo>();
+}
+
+
+/**
+ * @description Debits the caller's balance and releases `amount` of native NIGHT
+ * from the reserve to `recipient`. Second half of a shielded -> unshielded
+ * conversion.
+ *
+ * @notice Pure unshielded. Because unshielded UTXO outputs are public by
+ * construction, `recipient` is necessarily revealed on-chain (its disclosure is
+ * unavoidable for this value domain).
+ *
+ * Requirements:
+ *
+ * - `amount` is greater than zero.
+ * - `hash(secret)` holds a balance of at least `amount`.
+ * - The reserve holds at least `amount` of native NIGHT.
+ *
+ * @param {Bytes<32>} secret - The depositor's secret; debits `hash(secret)`.
+ * @param {Uint<64>} amount - The amount of native NIGHT to release.
+ * @param {Either<ContractAddress, UserAddress>} recipient - The unshielded recipient.
+ */
+export circuit withdrawUnshielded(
+  secret: Bytes<32>,
+  amount: Uint<64>,
+  recipient: Either<ContractAddress, UserAddress>
+): [] {
+  assert(amount > 0, "amount must be positive");
+  const _amount = disclose(amount) as Uint<128>;
+  debitKey(getBalanceKey(secret), _amount);
+  sendUnshielded(nativeToken(), _amount, disclose(recipient));
+}
+
+/**
+ * @description Debits the caller's balance and mints `amount` of the wrapper
+ * directly to `recipient`. Second half of an unshielded -> shielded conversion.
+ *
+ * @notice Pure shielded. A single self-balancing mint (no mint-to-self + send):
+ * the mint provides the value for its own output. `recipient` is a plain
+ * `ZswapCoinPublicKey` wrapped in `left()`, which keeps `mintShieldedToken`'s
+ * auto-receive-to-self branch statically dead, so the user-vs-contract discriminant
+ * is not leaked; `disclose()` acknowledges that `recipient` and `nonce` feed the
+ * public coin commitment (a one-way hash), while neither is written to public
+ * ledger state.
+ *
+ * @dev `nonce` is caller-supplied and MUST be unique per mint (the wallet generates
+ * a fresh random value). Reusing a nonce for the same (value, recipient) produces a
+ * duplicate commitment, which the ledger rejects. A caller-supplied nonce is used
+ * instead of a shared on-chain counter because reading such a counter would pin the
+ * transaction to its build-time value and make concurrent withdrawals conflict.
+ *
+ * Requirements:
+ *
+ * - `amount` is greater than zero.
+ * - `hash(secret)` holds a balance of at least `amount`.
+ *
+ * @param {Bytes<32>} secret - The depositor's secret; debits `hash(secret)`.
+ * @param {Uint<64>} amount - The amount of wrapper to mint.
+ * @param {ZswapCoinPublicKey} recipient - The shielded recipient's coin public key.
+ * @param {Bytes<32>} nonce - A caller-supplied, per-mint-unique nonce.
+ * @return {ShieldedCoinInfo} - The minted wrapper coin.
+ */
+export circuit withdrawShielded(
+  secret: Bytes<32>,
+  amount: Uint<64>,
+  recipient: ZswapCoinPublicKey,
+  nonce: Bytes<32>
+): ShieldedCoinInfo {
+  assert(amount > 0, "amount must be positive");
+  const _amount = disclose(amount);
+  debitKey(getBalanceKey(secret), _amount as Uint<128>);
+  return mintShieldedToken(
+    wrapDomain(),
+    _amount,
+    disclose(nonce),
+    left<ZswapCoinPublicKey, ContractAddress>(disclose(recipient))
+  );
+}
+
+/**
+ * @description Returns the credit balance held under `hash(secret)`.
+ *
+ * @param {Bytes<32>} secret - The depositor's secret.
+ * @return {Uint<128>} - The credit balance for that secret.
+ */
+export circuit getBalance(secret: Bytes<32>): Uint<128> {
+  return balances.lookup(getBalanceKey(secret));
+}
