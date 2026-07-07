@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { VaultState } from '../hooks/useVault';
 import { errMsg } from '../hooks/useVault';
 import { formatAmount, parseAmount } from '../lib/tokens';
-import { type Direction, runForwardSwap, runReverseSwap, type SwapStep, trackedWrapperTotal } from '../lib/swap';
+import { type Direction, runForwardSwap, runReverseSwap, type SwapStep } from '../lib/swap';
 
 const TOKENS = {
   toShielded: { from: 'NIGHT', to: 'wNIGHT' },
@@ -20,20 +20,14 @@ export function SwapCard({ vault }: { vault: VaultState }) {
   const { from, to } = TOKENS[direction];
   const ready = vault.connected && !!vault.contractAddress;
 
-  const trackedWrapper = useMemo(
-    () => (vault.contractAddress ? trackedWrapperTotal(vault.contractAddress) : 0n),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [vault.contractAddress, step, busy],
-  );
-
   const flip = () => {
     setDirection((d) => (d === 'toShielded' ? 'toUnshielded' : 'toShielded'));
     setLocalErr(undefined);
   };
 
-  // Max = spendable balance in the "from" token: NIGHT balance for forward,
-  // tracked wNIGHT for reverse.
-  const maxBase = direction === 'toShielded' ? (vault.balances?.nativeNight ?? 0n) : trackedWrapper;
+  // Max = the wallet's balance in the "from" token: NIGHT for forward, wNIGHT
+  // for reverse (the wallet funds the conversion + change during balancing).
+  const maxBase = direction === 'toShielded' ? (vault.balances?.nativeNight ?? 0n) : (vault.balances?.wrapper ?? 0n);
   const onMax = () => {
     setLocalErr(undefined);
     setAmount(formatAmount(maxBase));
@@ -78,6 +72,7 @@ export function SwapCard({ vault }: { vault: VaultState }) {
             contractAddress: vault.contractAddress,
             amount: amt,
             unshieldedAddress: vault.unshieldedAddress!,
+            wrapperColorHex: vault.wrapperColorHex!,
           },
           cb,
         );
@@ -139,8 +134,8 @@ export function SwapCard({ vault }: { vault: VaultState }) {
 
       {direction === 'toUnshielded' && (
         <p className="small muted" style={{ marginBottom: 0 }}>
-          Reverse converts a whole wrapper coin minted through this dApp. Tracked wNIGHT available:{' '}
-          <b>{formatAmount(trackedWrapper)}</b>.
+          Converts wNIGHT from your wallet back to NIGHT; the wallet selects coins and makes change. Available:{' '}
+          <b>{formatAmount(vault.balances?.wrapper ?? 0n)}</b> wNIGHT.
         </p>
       )}
 

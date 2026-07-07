@@ -109,13 +109,6 @@ function addCoin(addr: string, coin: StoredCoin): void {
   writeJson(COINS_KEY(addr), list);
 }
 
-function removeCoin(addr: string, nonceHex: string): void {
-  writeJson(
-    COINS_KEY(addr),
-    loadCoins(addr).filter((c) => c.nonceHex !== nonceHex),
-  );
-}
-
 /** Total wNIGHT (base units) this dApp has tracked as spendable coins. */
 export function trackedWrapperTotal(addr: string): bigint {
   return loadCoins(addr).reduce((sum, c) => sum + BigInt(c.value), 0n);
@@ -210,66 +203,57 @@ export interface ReverseInput {
   amount: bigint;
   /** Wallet's unshielded address string (from getUnshieldedAddress). */
   unshieldedAddress: string;
+  /** The wrapper (wNIGHT) 32-byte token color, hex. */
+  wrapperColorHex: string;
 }
 
 /**
  * wNIGHT → NIGHT: depositShielded(secret, coin) then
- * withdrawUnshielded(secret, coin.value, myAddress). Picks a dApp-minted coin
- * (best match ≥ amount, else largest) and converts it in full - remainder-free.
- * Best-effort: if no tracked coin exists, throws with a clear explanation
- * (the connector cannot enumerate arbitrary wrapper coins).
+ * withdrawUnshielded(secret, amount, myAddress).
+ *
+ * `coin.value` is the exact amount to convert. `receiveShielded` makes the
+ * contract receive that much wNIGHT; the wallet funds it from the caller's
+ * wNIGHT balance and produces the change output during balancing (just like an
+ * ordinary shielded send). So any amount up to the wallet's wNIGHT balance
+ * works - no coin tracking, no whole-coin rounding.
  */
 export async function runReverseSwap(input: ReverseInput, cb: SwapCallbacks = {}): Promise<bigint> {
-  const { providers, contractAddress, amount, unshieldedAddress } = input;
-  const coins = loadCoins(contractAddress);
-  if (coins.length === 0) {
-    throw new Error(
-      'No dApp-minted wrapper coin available to convert back. The wallet connector cannot ' +
-        'reveal an arbitrary coin\'s nonce, so only wNIGHT minted through this dApp (in this browser) ' +
-        'can be converted to NIGHT. Do a NIGHT → wNIGHT swap first, or restore this browser\'s data.',
-    );
-  }
-  // Smallest coin covering the request, else the largest available.
-  const sorted = [...coins].sort((a, b) => (BigInt(a.value) < BigInt(b.value) ? -1 : 1));
-  const chosen = sorted.find((c) => BigInt(c.value) >= amount) ?? sorted[sorted.length - 1];
-  const coinValue = BigInt(chosen.value);
-  const coin: ShieldedCoinInfo = {
-    nonce: hexToBytes(chosen.nonceHex),
-    color: hexToBytes(chosen.colorHex),
-    value: coinValue,
-  };
-  if (coinValue !== amount) {
-    cb.onLog?.(`Converting a whole tracked coin of ${coinValue} wNIGHT (nearest to ${amount}).`);
-  }
+  const { providers, contractAddress, amount, unshieldedAddress, wrapperColorHex } = input;
+  if (!wrapperColorHex) throw new Error('Wrapper token color unknown; connect and load balances first.');
 
   const secret = randomBytes32();
   const swap: PendingSwap = {
     id: idOf(),
     direction: 'toUnshielded',
     secretHex: bytesToHex(secret),
-    amount: coinValue.toString(),
+    amount: amount.toString(),
     step: 'started',
     createdAt: Date.now(),
-    coin: chosen,
   };
   upsertPending(contractAddress, swap);
 
-  cb.onStep?.('started', 'Burning wNIGHT (depositShielded)…');
+  // The contract receives `amount` wNIGHT; the wallet selects wrapper inputs
+  // and makes change. Fresh nonce for the contract's received coin.
+  const coin: ShieldedCoinInfo = {
+    nonce: randomBytes32(),
+    color: hexToBytes(wrapperColorHex),
+    value: amount,
+  };
+
+  cb.onStep?.('started', 'Sending wNIGHT (depositShielded)…');
   cb.onLog?.('depositShielded - approve in wallet');
   await call(providers, contractAddress, 'depositShielded', [secret, coin]);
-  // Coin is spent on-chain now; drop it from the tracked set.
-  removeCoin(contractAddress, chosen.nonceHex);
   swap.step = 'deposited';
   upsertPending(contractAddress, swap);
   cb.onStep?.('deposited', 'Releasing NIGHT (withdrawUnshielded)…');
 
   const recipient = rightUserAddress(addressToBytes(unshieldedAddress));
   cb.onLog?.('withdrawUnshielded - approve in wallet');
-  await withRetry(() => call(providers, contractAddress, 'withdrawUnshielded', [secret, coinValue, recipient]));
+  await withRetry(() => call(providers, contractAddress, 'withdrawUnshielded', [secret, amount, recipient]));
   removePending(contractAddress, swap.id);
   cb.onStep?.('done', 'Swap complete');
-  cb.onLog?.(`Released ${coinValue} NIGHT`);
-  return coinValue;
+  cb.onLog?.(`Released ${amount} NIGHT`);
+  return amount;
 }
 
 /**

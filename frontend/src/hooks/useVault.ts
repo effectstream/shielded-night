@@ -41,6 +41,8 @@ export interface VaultState {
 
   balances?: Balances;
   refreshBalances: () => Promise<void>;
+  /** The wrapper (wNIGHT) 32-byte color hex for the selected network, if known. */
+  wrapperColorHex?: string;
 
   connect: (api: InitialAPI) => Promise<void>;
   disconnect: () => void;
@@ -73,6 +75,8 @@ export function useVault(): VaultState {
 
   const network = NETWORKS.find((n) => n.key === networkKey)!;
   const contractAddress = contractAddressFor(networkKey);
+  const wrapperColorHex =
+    wrapperTokenTypeOverrideFor(networkKey) ?? (contractAddress ? deriveWrapperColorHex(contractAddress) ?? undefined : undefined);
 
   // Poll window.midnight for injected wallets.
   useEffect(() => {
@@ -191,6 +195,7 @@ export function useVault(): VaultState {
     networkIdConnected,
     balances,
     refreshBalances,
+    wrapperColorHex,
     connect,
     disconnect,
     logs,
