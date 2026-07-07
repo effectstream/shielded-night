@@ -56,6 +56,10 @@ Deploy a contract (needs a funded, DUST-registered wallet):
 
 ```bash
 MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy.ts
+
+# or deploy and immediately lock it (dissolve the maintenance committee -
+# permanently non-upgradeable, one-way):
+MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy-and-lock.ts
 ```
 
 ## How to run tests
