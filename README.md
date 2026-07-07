@@ -62,6 +62,17 @@ MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy.ts
 MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy-and-lock.ts
 ```
 
+## Locking the contract
+
+Every Midnight contract has a **maintenance authority** - a committee of keys allowed to change its rules (e.g. swap out a circuit's verifier key). On a fresh deploy that committee is just the deployer (1-of-1), so the deployer can still alter the contract after the fact. For a trustless release you remove that power.
+
+`scripts/deploy-and-lock.ts` does this in one shot: after deploying, it installs an **empty committee at threshold 1**. No signature set can ever satisfy an empty committee, so no future maintenance update can be authorized - the contract is permanently frozen. The script re-reads the on-chain authority and verifies `committee=0` before reporting success.
+
+- **Locked = un-upgradeable, not disabled.** All circuits keep working; only the rules can never change. Users can rely on the code (and the solvency invariant) never shifting under them.
+- **It is a one-way door.** A locked contract can't be unlocked. To change anything, deploy a fresh instance and point `frontend/.env` at the new address.
+
+On preview we deploy locked and just redeploy a new instance whenever we need to iterate.
+
 ## How to run tests
 
 Two tiers (details and env vars in [TESTING.md](TESTING.md)):
