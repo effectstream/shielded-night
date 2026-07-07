@@ -16,6 +16,8 @@ export interface Balances {
   nativeNight: bigint;
   wrapper: bigint;
   wrapperMatched: boolean;
+  nativeTokenId?: string;
+  wrapperTokenId?: string;
   allShielded: Record<string, bigint>;
   allUnshielded: Record<string, bigint>;
 }
@@ -105,6 +107,8 @@ export function useVault(): VaultState {
         nativeNight: native?.value ?? 0n,
         wrapper: wrap?.value ?? 0n,
         wrapperMatched: wrap != null,
+        nativeTokenId: native?.key ?? nativeNightKeys()[0],
+        wrapperTokenId: wrap?.key ?? override ?? derived ?? undefined,
         allShielded: shielded,
         allUnshielded: unshielded,
       });
