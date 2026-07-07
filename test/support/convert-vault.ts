@@ -88,6 +88,21 @@ export const withdrawShielded = (
   nonce: Uint8Array,
 ) => deployed.callTx.withdrawShielded(secret, amount, recipient, nonce);
 
+/** Atomic NIGHT -> wNIGHT in one tx (no secret). */
+export const convertToShielded = (
+  deployed: DeployedConvertVault,
+  amount: bigint,
+  recipient: { bytes: Uint8Array },
+  nonce: Uint8Array,
+) => deployed.callTx.convertToShielded(amount, recipient, nonce);
+
+/** Atomic wNIGHT -> NIGHT in one tx (no secret). */
+export const convertToUnshielded = (
+  deployed: DeployedConvertVault,
+  coin: { nonce: Uint8Array; color: Uint8Array; value: bigint },
+  recipient: ReturnType<typeof rightUserAddress>,
+) => deployed.callTx.convertToUnshielded(coin, recipient);
+
 export const tokenColor = (deployed: DeployedConvertVault) => deployed.callTx.tokenColor();
 export const name = (deployed: DeployedConvertVault) => deployed.callTx.name();
 export const symbol = (deployed: DeployedConvertVault) => deployed.callTx.symbol();

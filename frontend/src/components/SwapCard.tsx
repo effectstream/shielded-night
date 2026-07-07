@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { VaultState } from '../hooks/useVault';
 import { errMsg } from '../hooks/useVault';
 import { formatAmount, parseAmount } from '../lib/tokens';
-import { type Direction, runForwardSwap, runReverseSwap, type SwapStep } from '../lib/swap';
+import { type Direction, runConvertToShielded, runConvertToUnshielded, type SwapStep } from '../lib/swap';
 
 const TOKENS = {
   toShielded: { from: 'NIGHT', to: 'wNIGHT' },
@@ -56,7 +56,7 @@ export function SwapCard({ vault }: { vault: VaultState }) {
         onLog: vault.appendLog,
       };
       if (direction === 'toShielded') {
-        await runForwardSwap(
+        await runConvertToShielded(
           {
             providers: vault.providers,
             contractAddress: vault.contractAddress,
@@ -66,7 +66,7 @@ export function SwapCard({ vault }: { vault: VaultState }) {
           cb,
         );
       } else {
-        await runReverseSwap(
+        await runConvertToUnshielded(
           {
             providers: vault.providers,
             contractAddress: vault.contractAddress,
@@ -134,30 +134,22 @@ export function SwapCard({ vault }: { vault: VaultState }) {
 
       {direction === 'toUnshielded' && (
         <p className="small muted" style={{ marginBottom: 0 }}>
-          Converts wNIGHT from your wallet back to NIGHT; the wallet selects coins and makes change. Available:{' '}
+          Converts wNIGHT back to NIGHT; the wallet selects coins and makes change. Available:{' '}
           <b>{formatAmount(vault.balances?.wrapper ?? 0n)}</b> wNIGHT.
         </p>
       )}
 
       {step && (
-        <>
-          <div className="steps">
-            <div className={`step ${step === 'started' ? 'active' : 'done'}`}>
-              1 · {direction === 'toShielded' ? 'Deposit NIGHT' : 'Burn wNIGHT'}
-            </div>
-            <div className={`step ${step === 'deposited' ? 'active' : step === 'done' ? 'done' : ''}`}>
-              2 · {direction === 'toShielded' ? 'Mint wNIGHT' : 'Release NIGHT'}
-            </div>
-          </div>
-          <div className="small muted">{stepLabel}</div>
-        </>
+        <div className="steps">
+          <div className={`step ${step === 'done' ? 'done' : 'active'}`}>{stepLabel || 'Converting…'}</div>
+        </div>
       )}
 
       {localErr && <p className="err small">{localErr}</p>}
 
       <div className="spacer" />
       <button className="btn btn-primary btn-block" disabled={!ready || busy} onClick={onSwap}>
-        {busy ? 'Swapping…' : `Swap ${from} → ${to}`}
+        {busy ? 'Converting…' : `Swap ${from} → ${to}`}
       </button>
       {!ready && (
         <p className="small muted" style={{ marginBottom: 0 }}>
@@ -167,7 +159,7 @@ export function SwapCard({ vault }: { vault: VaultState }) {
         </p>
       )}
       <p className="small muted" style={{ marginBottom: 0 }}>
-        Each swap is two transactions - expect two wallet approvals.
+        One transaction, one wallet approval.
       </p>
     </div>
   );

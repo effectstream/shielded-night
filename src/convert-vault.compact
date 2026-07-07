@@ -375,3 +375,77 @@ export circuit withdrawShielded(
 export circuit getBalance(secret: Bytes<32>): Uint<128> {
   return balances.lookup(getBalanceKey(secret));
 }
+
+/**
+ * @description ATOMIC unshielded -> shielded convert in ONE circuit: lock
+ * `amount` of native NIGHT and mint `amount` of the wrapper to `recipient` in
+ * the same transaction. No secret, no credit — because deposit and mint happen
+ * together there is nothing to bridge, so the per-key pool bookkeeping is
+ * unnecessary. Locked NIGHT still backs the minted wrapper 1:1.
+ *
+ * @notice One transaction, one wallet approval. Combines a `receiveUnshielded`
+ * (unshielded input) with a self-balancing `mintShieldedToken` (shielded output)
+ * in a single contract interaction / single segment — the only way to net both
+ * domains in one tx (merging two separate calls cannot, as their intents land
+ * in different segments).
+ *
+ * Requirements:
+ * - `amount` is greater than zero.
+ * - `recipient` is not the zero coin public key (burn address).
+ *
+ * @param {Uint<64>} amount - Native NIGHT to lock and wrapper to mint.
+ * @param {ZswapCoinPublicKey} recipient - The shielded recipient's coin public key.
+ * @param {Bytes<32>} nonce - A caller-supplied, per-mint-unique nonce.
+ * @return {ShieldedCoinInfo} - The minted wrapper coin.
+ */
+export circuit convertToShielded(
+  amount: Uint<64>,
+  recipient: ZswapCoinPublicKey,
+  nonce: Bytes<32>
+): ShieldedCoinInfo {
+  assert(amount > 0, "amount must be positive");
+  assert(!(default<ZswapCoinPublicKey> == recipient), "invalid recipient");
+  const amt = disclose(amount);
+  receiveUnshielded(nativeToken(), amt as Uint<128>);
+  return mintShieldedToken(
+    wrapDomain(),
+    amt,
+    disclose(nonce),
+    left<ZswapCoinPublicKey, ContractAddress>(disclose(recipient))
+  );
+}
+
+/**
+ * @description ATOMIC shielded -> unshielded convert in ONE circuit: burn a
+ * wrapper `coin` (contract receives it) and release its value in native NIGHT
+ * to `recipient`, in the same transaction. No secret, no credit. The released
+ * NIGHT is drawn from the reserve prior `convertToShielded` calls locked.
+ *
+ * @notice One transaction, one wallet approval. Combines a `receiveShielded`
+ * (shielded input) with a `sendUnshielded` (unshielded output) in a single
+ * contract interaction / single segment.
+ *
+ * Requirements:
+ * - `coin.value` is greater than zero.
+ * - `coin.color` is this vault's wrapper color.
+ * - `recipient` is not the zero address (burn).
+ *
+ * @param {ShieldedCoinInfo} coin - The wrapper coin to burn.
+ * @param {Either<ContractAddress, UserAddress>} recipient - The unshielded recipient.
+ */
+export circuit convertToUnshielded(
+  coin: ShieldedCoinInfo,
+  recipient: Either<ContractAddress, UserAddress>
+): [] {
+  const c = disclose(coin);
+  assert(c.value > 0, "coin value must be positive");
+  assert(c.color == wrapColor(), "not this vault's shielded wrapper");
+  assert(
+    recipient.is_left
+      ? !(default<ContractAddress> == recipient.left)
+      : !(default<UserAddress> == recipient.right),
+    "invalid recipient"
+  );
+  receiveShielded(c);
+  sendUnshielded(nativeToken(), c.value, disclose(recipient));
+}

@@ -153,6 +153,46 @@ export interface ForwardInput {
 }
 
 /**
+ * ONE-TX convert NIGHT -> wNIGHT via the atomic `convertToShielded` circuit:
+ * one contract call, one wallet approval, no secret/credit. Proven end-to-end
+ * on-chain (integration test).
+ */
+export async function runConvertToShielded(input: ForwardInput, cb: SwapCallbacks = {}): Promise<void> {
+  const { providers, contractAddress, amount, coinPublicKey } = input;
+  const recipient = { bytes: addressToBytes(coinPublicKey) };
+  cb.onStep?.('started', 'Converting NIGHT -> wNIGHT in one transaction…');
+  cb.onLog?.('convertToShielded - approve in wallet');
+  await call(providers, contractAddress, 'convertToShielded', [amount, recipient, randomBytes32()]);
+  cb.onStep?.('done', 'Converted in one transaction ✓');
+  cb.onLog?.(`Minted ${amount} wNIGHT (single tx)`);
+}
+
+export interface ConvertToUnshieldedInput {
+  providers: Providers;
+  contractAddress: string;
+  amount: bigint;
+  unshieldedAddress: string;
+  wrapperColorHex: string;
+}
+
+/**
+ * ONE-TX convert wNIGHT -> NIGHT via the atomic `convertToUnshielded` circuit.
+ * The contract receives `amount` wNIGHT (wallet funds + change) and releases
+ * `amount` NIGHT to the caller, in a single call/approval.
+ */
+export async function runConvertToUnshielded(input: ConvertToUnshieldedInput, cb: SwapCallbacks = {}): Promise<void> {
+  const { providers, contractAddress, amount, unshieldedAddress, wrapperColorHex } = input;
+  if (!wrapperColorHex) throw new Error('Wrapper token color unknown; connect and load balances first.');
+  const coin: ShieldedCoinInfo = { nonce: randomBytes32(), color: hexToBytes(wrapperColorHex), value: amount };
+  const recipient = rightUserAddress(addressToBytes(unshieldedAddress));
+  cb.onStep?.('started', 'Converting wNIGHT -> NIGHT in one transaction…');
+  cb.onLog?.('convertToUnshielded - approve in wallet');
+  await call(providers, contractAddress, 'convertToUnshielded', [coin, recipient]);
+  cb.onStep?.('done', 'Converted in one transaction ✓');
+  cb.onLog?.(`Released ${amount} NIGHT (single tx)`);
+}
+
+/**
  * NIGHT → wNIGHT: depositUnshielded(secret, amount) then
  * withdrawShielded(secret, amount, myCoinPublicKey, nonce). The minted coin is
  * persisted so it can be converted back later.

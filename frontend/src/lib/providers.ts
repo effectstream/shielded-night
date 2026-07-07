@@ -42,8 +42,17 @@ export async function buildProviders(connectedAPI: ConnectedAPI): Promise<Conver
     },
   };
 
-  // Proving is delegated entirely to the wallet: hand it the ZK key material
-  // and it produces proofs against whatever proof server IT is configured with.
+  // Proving is entirely the wallet's domain. The dApp hands over the contract's
+  // ZK key material and the WALLET proves, in its own trust boundary - the dApp
+  // never names or reaches a proof server (doing so could leak the private
+  // witness to a dApp-chosen prover). If a wallet doesn't implement this yet,
+  // that's a wallet gap; we surface it rather than working around it.
+  if (typeof (connectedAPI as { getProvingProvider?: unknown }).getProvingProvider !== 'function') {
+    throw new Error(
+      'This wallet does not support dApp proving yet (no getProvingProvider). ' +
+        'Proving is wallet-owned by design - update to a wallet build that implements getProvingProvider.',
+    );
+  }
   const provingProvider = await connectedAPI.getProvingProvider(zkConfigProvider.asKeyMaterialProvider());
   const proofProvider = createProofProvider(provingProvider);
 

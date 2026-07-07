@@ -52,6 +52,22 @@ export type ImpureCircuits<PS> = {
                                                                                value: bigint
                                                                              }>;
   getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+  convertToShielded(context: __compactRuntime.CircuitContext<PS>,
+                    amount_0: bigint,
+                    recipient_0: { bytes: Uint8Array },
+                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                color: Uint8Array,
+                                                                                value: bigint
+                                                                              }>;
+  convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
+                      coin_0: { nonce: Uint8Array,
+                                color: Uint8Array,
+                                value: bigint
+                              },
+                      recipient_0: { is_left: boolean,
+                                     left: { bytes: Uint8Array },
+                                     right: { bytes: Uint8Array }
+                                   }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type ProvableCircuits<PS> = {
@@ -103,6 +119,22 @@ export type ProvableCircuits<PS> = {
                                                                                value: bigint
                                                                              }>;
   getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+  convertToShielded(context: __compactRuntime.CircuitContext<PS>,
+                    amount_0: bigint,
+                    recipient_0: { bytes: Uint8Array },
+                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                color: Uint8Array,
+                                                                                value: bigint
+                                                                              }>;
+  convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
+                      coin_0: { nonce: Uint8Array,
+                                color: Uint8Array,
+                                value: bigint
+                              },
+                      recipient_0: { is_left: boolean,
+                                     left: { bytes: Uint8Array },
+                                     right: { bytes: Uint8Array }
+                                   }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type PureCircuits = {
@@ -157,6 +189,22 @@ export type Circuits<PS> = {
                                                                                value: bigint
                                                                              }>;
   getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+  convertToShielded(context: __compactRuntime.CircuitContext<PS>,
+                    amount_0: bigint,
+                    recipient_0: { bytes: Uint8Array },
+                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                color: Uint8Array,
+                                                                                value: bigint
+                                                                              }>;
+  convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
+                      coin_0: { nonce: Uint8Array,
+                                color: Uint8Array,
+                                value: bigint
+                              },
+                      recipient_0: { is_left: boolean,
+                                     left: { bytes: Uint8Array },
+                                     right: { bytes: Uint8Array }
+                                   }): __compactRuntime.CircuitResults<PS, []>;
 }
 
 export type Ledger = {
