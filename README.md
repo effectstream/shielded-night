@@ -42,7 +42,8 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 ├── scripts/
 │   ├── deploy.ts                    # deploy from src/managed (mnemonic or seed)
 │   ├── deploy-and-lock.ts           # deploy, then lock (one-way, non-upgradeable)
-│   └── lock.ts                      # lock an already-deployed contract (has DRY_RUN)
+│   ├── lock.ts                      # lock an already-deployed contract (has DRY_RUN)
+│   └── verify-deployment.ts         # read-only: on-chain keys == this repo, lock status
 ├── envs/docker-compose-dynamic.yml  # local node + indexer + proof server
 ├── frontend/                        # Vite + React dApp
 │   └── src/
@@ -98,6 +99,47 @@ Locking installs an **empty committee at threshold 1**. No signature set can eve
 - **It is a one-way door.** A locked contract can't be unlocked. To change anything, deploy a fresh instance and point `frontend/.env` at the new address.
 
 The live preview contract is locked. To iterate, deploy a fresh instance and repoint the frontend.
+
+## Verifying the deployment
+
+Anyone can check, without trusting us, that (1) the deployed contract is exactly the code in this repo and (2) it can never be changed. Both checks are read-only - no wallet or seed needed.
+
+### 1. Reproduce the compiled artifacts byte-for-byte
+
+The compiler output is deterministic and the contract pins its language version (`pragma language_version 0.23`), so compiling [src/shielded-night.compact](src/shielded-night.compact) with the pinned toolchain reproduces [src/managed/](src/managed/) exactly:
+
+```bash
+# Install the Compact toolchain (once): https://docs.midnight.network/relnotes/compact-tools
+compact update 0.31.1      # toolchain 0.31.1 = compactc 0.31.101, language 0.23.101
+
+bun install
+bun run compact            # recompiles src/shielded-night.compact -> src/managed/
+git diff --exit-code src/managed/   # empty diff = byte-exact reproduction
+```
+
+If `git diff` prints nothing, the committed artifacts (zkir, prover/verifier keys, JS bindings) are exactly what this source compiles to - there is nothing hidden in the build.
+
+### 2. Verify the on-chain contract matches, and is immutable
+
+```bash
+MN_ENV=preview CV_ADDRESS=<deployed-address> bun run verify:deployment
+```
+
+The script queries the public indexer and checks:
+
+- **Code**: every circuit's on-chain verifier key is byte-identical to `src/managed/keys/*.verifier`, and the circuit sets match exactly (nothing missing, nothing extra). Together with step 1, this proves the deployed rules were compiled from this exact source.
+- **Lock**: the on-chain maintenance authority is an **empty committee with threshold >= 1**. A maintenance update needs `threshold` committee signatures, and an empty committee can never produce even one - so `committee(0) < threshold(1)` means no rule, verifier key, or behavior can ever be changed. The deployed version is immutable.
+
+Expected output ends with:
+
+```
+maintenance authority: committee=0 threshold=1 counter=1
+✓ LOCKED: empty committee with positive threshold - no maintenance update can ever be authorized.
+
+✅ verified: deployed code matches this repo byte-for-byte AND the contract is immutable.
+```
+
+The script exits non-zero if either check fails (e.g. it correctly flags contracts deployed from older builds).
 
 ## How to run tests
 

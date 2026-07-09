@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma language_version >= 0.20;
+// Pinned to the exact language version the deployed build was compiled with
+// (toolchain 0.31.1 = compactc 0.31.101, language 0.23.101). An exact pin is
+// what makes the byte-exact reproduction in README "Verifying the deployment"
+// meaningful: a different language version would refuse to compile rather than
+// silently emit different artifacts.
+pragma language_version 0.23;
 
 import CompactStandardLibrary;
 
