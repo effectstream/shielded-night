@@ -78,7 +78,7 @@ async function main() {
     console.log('\n✅ deployed ShieldedNight');
     console.log(`   address: ${address}`);
     console.log(`\nPaste into frontend/.env:`);
-    console.log(`   VITE_CONTRACT_ADDRESS_${env.toUpperCase()}=${address}`);
+    console.log(`   ${env.toUpperCase()}_ADDRESS=${address}`);
   } finally {
     await walletCtx.wallet.stop().catch(() => undefined);
   }

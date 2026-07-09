@@ -14,6 +14,9 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const managedSrc = path.resolve(dir, '..', 'src', 'managed');
 
 export default defineConfig({
+  // Expose the per-network contract-address vars (PREVIEW_ADDRESS etc.) to the
+  // client alongside the standard VITE_ prefix.
+  envPrefix: ['VITE_', 'PREVIEW_', 'PREPROD_', 'MAINNET_', 'UNDEPLOYED_'],
   define: {
     global: 'globalThis',
   },

@@ -63,7 +63,7 @@ export function BalancePanel({
       {anomaly && (
         <p className="small warn" style={{ margin: '6px 0 0' }}>
           This dApp minted {formatAmount(mintedTotal)} wNIGHT but the wallet doesn't show it under the expected token
-          type. If the wallet lists a new asset, set VITE_WRAPPER_TOKEN_TYPE_* in .env.
+          type (derived from the contract address). Check the network's address in .env matches the deployed contract.
         </p>
       )}
     </div>

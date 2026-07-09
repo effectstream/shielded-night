@@ -15,7 +15,8 @@
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "smoke": "vitest run --config vitest.integration.config.ts -t \"\\[smoke\\]\""
+    "smoke": "vitest run --config vitest.integration.config.ts -t \"\\[smoke\\]\"",
+    "verify:deployment": "bun run scripts/verify-deployment.ts"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "^2.5.1",

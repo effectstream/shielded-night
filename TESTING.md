@@ -102,20 +102,16 @@ an all-zero coin public key is Midnight's burn representation, so minting to
 it would irrecoverably destroy the wrapper while its backing NIGHT stayed
 locked (this guard was added by this suite; see git history).
 
-## Transient variant (`depositShielded_notWorking`)
+## Burn transient (`depositShielded`)
 
+`depositShielded` receives the exact wrapper coin the wallet sends and burns it
+via `sendImmediateShielded` in the same transaction (a transient), so the
+wrapper supply is elastic both ways: minted on withdraw, burnt on deposit.
 [test/integration/shielded-night.transient.test.ts](test/integration/shielded-night.transient.test.ts)
-plus a unit suite verify the `sendImmediateShielded` variant end-to-end on the
-current stack: the transaction applies, credits are exact, the partial-burn
-change coin is returned with the exact remainder and is spendable, and the
-**wallet SDK's balance view converges correctly** after the transient (probed
-with a bounded wait). The "spent UTXO still listed" mis-listing reported from
-browser wallets does not reproduce with wallet-sdk 1.2.0 / indexer 4.3.3 —
-the defect is in the browser-wallet display layer, not the contract.
-
-Caveat: the partial-burn change coin is *invisible* to every wallet by design
-(contract-sent coins carry no ciphertext); the circuit's return value is the
-only recoverable copy, so a dapp using this path MUST persist it.
+pins the fixed behavior on the current stack (toolchain 0.31.101 / ledger-v8
+8.1.0): the transaction applies, the credit equals the coin value, the **wallet
+sees the coin as spent** (the historical bug left the spent UTXO listed as
+spendable, corrupting wallet state), and the credit withdraws again cleanly.
 
 ## Known sharp edges
 

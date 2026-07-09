@@ -4,12 +4,7 @@ import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import { findInitialAPIs, isCompatibleApiVersion } from '../lib/connector';
 import { buildProviders } from '../lib/providers';
 import { ledger, type ShieldedNightProviders } from '../lib/contract';
-import {
-  contractAddressFor,
-  NETWORKS,
-  type NetworkOption,
-  wrapperTokenTypeOverrideFor,
-} from '../lib/networks';
+import { contractAddressFor, NETWORKS, type NetworkOption } from '../lib/networks';
 import { deriveWrapperColorHex, nativeNightKeys, pickBalance } from '../lib/tokens';
 
 export interface Balances {
@@ -80,8 +75,7 @@ export function useShieldedNight(): ShieldedNightState {
 
   const network = NETWORKS.find((n) => n.key === networkKey)!;
   const contractAddress = contractAddressFor(networkKey);
-  const wrapperColorHex =
-    wrapperTokenTypeOverrideFor(networkKey) ?? (contractAddress ? deriveWrapperColorHex(contractAddress) ?? undefined : undefined);
+  const wrapperColorHex = contractAddress ? deriveWrapperColorHex(contractAddress) ?? undefined : undefined;
 
   // Poll window.midnight for injected wallets.
   useEffect(() => {
@@ -134,15 +128,14 @@ export function useShieldedNight(): ShieldedNightState {
     try {
       const [shielded, unshielded] = await Promise.all([api.getShieldedBalances(), api.getUnshieldedBalances()]);
       const native = pickBalance(unshielded, nativeNightKeys());
-      const override = wrapperTokenTypeOverrideFor(networkKey);
       const derived = contractAddress ? deriveWrapperColorHex(contractAddress) : null;
-      const wrap = pickBalance(shielded, override ? [override] : [], override ?? derived);
+      const wrap = pickBalance(shielded, derived ? [derived] : [], derived);
       setBalances({
         nativeNight: native?.value ?? 0n,
         wrapper: wrap?.value ?? 0n,
         wrapperMatched: wrap != null,
         nativeTokenId: native?.key ?? nativeNightKeys()[0],
-        wrapperTokenId: wrap?.key ?? override ?? derived ?? undefined,
+        wrapperTokenId: wrap?.key ?? derived ?? undefined,
         allShielded: shielded,
         allUnshielded: unshielded,
       });

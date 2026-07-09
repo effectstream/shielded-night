@@ -12,7 +12,6 @@ Vite + React 18 + TypeScript. Adapted from the `midnight-wallet-dapp` reference.
 ```bash
 cd frontend
 bun install
-cp .env.example .env      # then fill in the deployed contract address(es)
 bun run dev               # http://localhost:5173
 ```
 
@@ -24,12 +23,17 @@ so the browser proof step can fetch prover/verifier keys.
 
 | Var | Purpose |
 | --- | --- |
-| `VITE_CONTRACT_ADDRESS_PREVIEW` / `_PREPROD` / `_UNDEPLOYED` | Deployed contract address per network (the dropdown picks which is used). |
-| `VITE_WRAPPER_TOKEN_TYPE_*` | Optional. Override the wNIGHT shielded token-type key if the app can't auto-identify it in the wallet's balances. |
-| `VITE_PROOF_SERVER_URI` | Optional. Override the proof server; defaults to the `proverServerUri` the connected wallet reports. |
+| `PREVIEW_ADDRESS` / `PREPROD_ADDRESS` / `MAINNET_ADDRESS` / `UNDEPLOYED_ADDRESS` | Deployed contract address per network (the dropdown shows only networks with an address set). |
 
-The wallet supplies the indexer / node / proof-server URLs (`getConfiguration()`); the
-dApp only needs the contract address per network.
+The wallet supplies the indexer / node / proof-server URLs (`getConfiguration()`)
+and owns proving; the dApp only needs the contract address per network. The
+wNIGHT token type is derived from the address.
+
+**`.env` is committed.** It holds only public on-chain addresses, so the
+deployed address per network lives in git history (each redeploy is a commit).
+Secrets never go in it - deploy scripts read `MN_MNEMONIC` / `MN_SEED` from the
+shell environment. For personal overrides use `.env.local` (gitignored; Vite
+loads it over `.env`).
 
 ## How it works
 
