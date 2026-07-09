@@ -62,7 +62,7 @@ The frontend is a Vite + React app that connects to any `window.midnight` wallet
 ```bash
 cd frontend
 bun install
-cp .env.example .env     # set VITE_CONTRACT_ADDRESS_PREVIEW to your deployed contract
+cp .env.example .env     # set PREVIEW_ADDRESS to your deployed contract
 bun run dev              # http://localhost:5173
 ```
 

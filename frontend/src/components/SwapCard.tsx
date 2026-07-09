@@ -154,7 +154,7 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       {!ready && (
         <p className="small muted" style={{ marginBottom: 0 }}>
           {sn.connected
-            ? `No contract address configured for ${sn.networkKey}. Set VITE_CONTRACT_ADDRESS_${sn.networkKey.toUpperCase()} in .env.`
+            ? `No contract address configured for ${sn.networkKey}. Set ${sn.networkKey.toUpperCase()}_ADDRESS in .env.`
             : 'Connect a wallet to swap.'}
         </p>
       )}

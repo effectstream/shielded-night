@@ -10,19 +10,17 @@ import {
 } from '../support/wallet-observations.js';
 
 /**
- * `depositShielded_notWorking` investigation: the variant burns part of the
- * received coin via `sendImmediateShielded` (a same-transaction transient) and
- * refunds the remainder. Browser wallets reportedly mis-list the result (spent
- * UTXOs still shown). These tests separate three independent questions:
+ * `depositShielded` burns the received coin via `sendImmediateShielded` — a
+ * same-transaction transient. Older wallet stacks mis-listed the result (the
+ * spent input UTXO still showed as spendable); toolchain 0.31.101 / ledger-v8
+ * 8.1.0 fixed that. These tests pin the fix, separating three questions:
  *
  * 1. Does the transaction build, balance, and apply on the current stack?
- * 2. Is the CONTRACT accounting correct on-chain (credit, change value,
- *    change spendability — i.e. can funds ever be lost)?
- * 3. Does the wallet SDK's own view converge to the truth (measured and
- *    logged, asserted only as a bounded wait)?
+ * 2. Is the CONTRACT accounting correct on-chain (credit == coin value)?
+ * 3. Does the wallet's own view converge to the truth (coin seen as spent)?
  *
- * If 1+2 hold but wallets still list wrong, the field bug is purely a
- * wallet-display issue, not a funds-safety issue.
+ * A regression in 3 is the historical field bug — display-level, not
+ * funds-safety — but it corrupts wallet state, so it fails the suite loudly.
  */
 
 const N = 1_000_000n;
@@ -46,10 +44,10 @@ const probeWalletView = async (
   }
 };
 
-describe('shielded-night — sendImmediateShielded transient variant', () => {
+describe('shielded-night — depositShielded burn transient', () => {
   describeContract(contract.factory, (ctx) => {
     test(
-      'full burn: transaction applies, credit is exact, wallet view measured',
+      'whole-coin burn: transaction applies, credit is exact, wallet sees the coin as spent',
       async () => {
         const c = ctx();
         const deployed = await c.deployFresh([...contract.DEPLOY_ARGS]);
@@ -58,72 +56,34 @@ describe('shielded-night — sendImmediateShielded transient variant', () => {
         const mintSecret = randomBytes32();
         const burnSecret = randomBytes32();
 
-        // Mint a wrapper coin the normal way.
+        // Mint a wrapper coin of the EXACT deposit size — the wallet is in
+        // charge of producing the exact UTXO it wants to store (splitting a
+        // larger coin into deposit + change happens wallet-side, before this).
         await contract.depositUnshielded(deployed, mintSecret, N);
         const coin = (
           await contract.withdrawShielded(deployed, mintSecret, N, me, randomBytes32())
         ).private.result;
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b >= N);
 
-        // Q1+Q2: full burn through the transient path.
-        const res = (
-          await contract.depositShieldedWithChange(deployed, burnSecret, coin, N, contract.leftCoinPublicKey(me.bytes))
-        ).private.result;
-        expect(res.is_some).toBe(false); // no change on a full burn
+        // Q1+Q2: deposit burns the whole coin in one tx and credits its value.
+        await contract.depositShielded(deployed, burnSecret, coin);
         expect((await contract.getBalance(deployed, burnSecret)).private.result).toBe(N);
 
-        // Q3: does the SDK wallet see the coin as spent?
+        // Q3: the wallet must see the coin as SPENT (balance 0) — the
+        // historical sendImmediateShielded bug left it listed as spendable.
         const view = await probeWalletView(c.walletCtx, colorHex, 0n);
-        console.log(`[transient/full-burn] wallet view: ${view}`);
-        expect(view, `wallet view after full transient burn: ${view}`).toContain('converged');
-      },
-      10 * 60_000,
-    );
+        console.log(`[transient/burn] wallet view: ${view}`);
+        expect(view, `wallet view after transient burn: ${view}`).toContain('converged');
 
-    test(
-      'partial burn: exact change is returned, spendable, and nothing is lost',
-      async () => {
-        const c = ctx();
-        const deployed = await c.deployFresh([...contract.DEPLOY_ARGS]);
-        const colorHex = tokenColorHex((await contract.tokenColor(deployed)).private.result);
-        const me = await getCoinPublicKey(c.walletCtx);
-        const mintSecret = randomBytes32();
-        const burnSecret = randomBytes32();
-        const changeSecret = randomBytes32();
-        const BURN = N / 4n;
-
-        await contract.depositUnshielded(deployed, mintSecret, N);
-        const coin = (
-          await contract.withdrawShielded(deployed, mintSecret, N, me, randomBytes32())
+        // The credit stays fully usable after the burn: withdraw re-mints the
+        // wrapper (elastic supply), proving nothing was stranded by the burn.
+        const again = (
+          await contract.withdrawShielded(deployed, burnSecret, N, me, randomBytes32())
         ).private.result;
+        expect(again.value).toBe(N);
+        expect(tokenColorHex(again.color)).toBe(colorHex);
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b >= N);
-
-        // Partial burn: credit BURN, change N - BURN refunded to us.
-        const res = (
-          await contract.depositShieldedWithChange(deployed, burnSecret, coin, BURN, contract.leftCoinPublicKey(me.bytes))
-        ).private.result;
-        expect(res.is_some).toBe(true);
-        const change = res.value;
-        expect(change.value).toBe(N - BURN);
-        expect(tokenColorHex(change.color)).toBe(colorHex);
-        expect((await contract.getBalance(deployed, burnSecret)).private.result).toBe(BURN);
-
-        // The change coin is REAL: spend it through the plain deposit path.
-        // (Contract-sent coins carry no ciphertext — this returned struct is
-        // the only recoverable copy, so spendability is the loss-safety proof.)
-        await contract.depositShielded(deployed, changeSecret, change);
-        expect((await contract.getBalance(deployed, changeSecret)).private.result).toBe(N - BURN);
-
-        // Conservation: BURN + (N - BURN) credited, original N debited once.
-        const total =
-          (await contract.getBalance(deployed, burnSecret)).private.result +
-          (await contract.getBalance(deployed, changeSecret)).private.result;
-        expect(total).toBe(N);
-
-        // Q3: wallet should end at zero wrapper (coin spent, change also spent).
-        const view = await probeWalletView(c.walletCtx, colorHex, 0n);
-        console.log(`[transient/partial-burn] wallet view: ${view}`);
-        expect(view, `wallet view after change spend: ${view}`).toContain('converged');
+        expect((await contract.getBalance(deployed, burnSecret)).private.result).toBe(0n);
       },
       10 * 60_000,
     );

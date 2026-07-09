@@ -207,74 +207,38 @@ export circuit depositUnshielded(secret: Bytes<32>, amount: Uint<64>): [] {
 }
 
 /**
- * @description Burns `amount` of a wrapper coin (shielded) and credits the caller's
- * balance by `amount`. First half of a shielded -> unshielded conversion.
+ * @description Burns a wrapper `coin` (shielded) and credits the caller's balance
+ * by its full value. First half of a shielded -> unshielded conversion.
  *
- * @notice Pure shielded. `coin` must be this contract's wrapper. `amount` is sent to the
- * shielded burn address; the remainder (`coin.value - amount`) is returned to
- * `refundTo` and echoed back as the return value. Because contract-sent coins carry
- * no ciphertext, that returned `ShieldedCoinInfo` is the only recoverable copy of the
- * change — the caller MUST retain it to spend the change later.
+ * @notice Pure shielded, whole-coin: there is no amount parameter. The WALLET is
+ * in charge of sending the exact UTXO to deposit — it splits a larger coin and
+ * makes change on its own side first, then spends the exact coin here. The coin
+ * is received and immediately sent to the shielded burn address in the same
+ * transaction (a transient), so the wrapper supply is truly elastic: minted on
+ * withdraw, burnt on deposit. Nothing accumulates in the contract and nothing is
+ * returned.
+ *
+ * @dev The burn transient requires a wallet on toolchain 0.31.101+ / ledger-v8
+ * 8.1.0; older wallets failed to mark the spent input UTXO as spent.
  *
  * Requirements:
  *
  * - `coin.value` is greater than zero.
  * - `coin.color` is this contract's wrapper color.
- * - `0 < amount <= coin.value`.
  *
  * @param {Bytes<32>} secret - The depositor's secret; credits `hash(secret)`.
- * @param {ShieldedCoinInfo} coin - The wrapper coin to burn from.
- * @param {Uint<128>} amount - How much of `coin` to burn and credit.
- * @param {Either<ZswapCoinPublicKey, ContractAddress>} refundTo - Where the change goes.
- * @return {Maybe<ShieldedCoinInfo>} - The change coin, or none if fully burned.
- */
-export circuit depositShielded_notWorking(
-  secret: Bytes<32>,
-  coin: ShieldedCoinInfo,
-  amount: Uint<128>,
-  refundTo: Either<ZswapCoinPublicKey, ContractAddress>
-): Maybe<ShieldedCoinInfo> {
-  const c = disclose(coin);
-  assert(c.value > 0, "coin value must be positive");
-  assert(c.color == wrapColor(), "not this contract's shielded wrapper");
-
-  const amt = disclose(amount);
-  assert(amt > 0, "amount must be positive");
-  assert(amt <= c.value, "amount exceeds coin value");
-
-  receiveShielded(c);
-  // BUG:
-  // sendImmediateShielded is not playing well with wallets. 
-  // Wallets are are not able to see that the utxo is spent.
-  const sendRes = sendImmediateShielded(c, shieldedBurnAddress(), amt);
-  creditKey(getBalanceKey(secret), amt);
-
-  // Return the change (unburned remainder) sent back to `refundTo`).
-  if (disclose(sendRes.change.is_some)) {
-    const refundRes = sendImmediateShielded(
-      disclose(sendRes.change.value),
-      disclose(refundTo),
-      disclose(sendRes.change.value.value)
-    );
-    return some<ShieldedCoinInfo>(refundRes.sent);
-  }
-  return none<ShieldedCoinInfo>();
-}
-
-/*
- * This alternative version, keeps the shielded tokens in the contract, but there is no way to move them out.
- * The wallet is in charge of sending the exact UTXO that will be locked in the contract.
+ * @param {ShieldedCoinInfo} coin - The exact wrapper coin to burn.
  */
 export circuit depositShielded(
   secret: Bytes<32>,
   coin: ShieldedCoinInfo,
-): Maybe<ShieldedCoinInfo> {
+): [] {
   const c = disclose(coin);
   assert(c.value > 0, "coin value must be positive");
   assert(c.color == wrapColor(), "not this contract's shielded wrapper");
   receiveShielded(c);
+  sendImmediateShielded(c, shieldedBurnAddress(), c.value);
   creditKey(getBalanceKey(secret), c.value);
-  return none<ShieldedCoinInfo>();
 }
 
 

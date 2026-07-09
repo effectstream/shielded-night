@@ -90,7 +90,7 @@ async function main() {
     console.log(`   address: ${address}`);
     console.log(`   authority: committee=${after.committeeSize} threshold=${after.threshold} counter=${after.counter}`);
     console.log(`\nPaste into frontend/.env:`);
-    console.log(`   VITE_CONTRACT_ADDRESS_${env.toUpperCase()}=${address}`);
+    console.log(`   ${env.toUpperCase()}_ADDRESS=${address}`);
   } finally {
     await walletCtx.wallet.stop().catch(() => undefined);
   }
