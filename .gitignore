@@ -5,9 +5,11 @@ midnight-level-db*/
 .cache/
 *.log
 
-# Local env overrides — never commit. frontend/.env itself IS committed: it
-# holds only the public deployed contract addresses (audit trail in git
-# history). Secrets stay in the shell env (MN_MNEMONIC/MN_SEED), never files.
+# Root .env holds SECRETS for the deploy/lock scripts (MN_MNEMONIC / MN_SEED;
+# template in .env.example) — never commit it. frontend/.env is the opposite:
+# committed on purpose, it holds only the public deployed contract addresses
+# (audit trail in git history).
+/.env
 .env.local
 .env.*.local
 

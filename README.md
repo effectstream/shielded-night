@@ -68,15 +68,23 @@ bun run dev              # http://localhost:5173  (uses the committed .env)
 
 Needs a Midnight wallet extension and the compiled artifacts in `src/managed/` (run `bun run compact` at the repo root if missing). Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
 
-Deploy a contract (needs a funded, DUST-registered wallet):
+Deploy a contract (needs a funded, DUST-registered wallet). Put the deployer
+credentials in the repo-root `.env` (gitignored - template in
+[.env.example](.env.example); the shell env still takes precedence):
 
 ```bash
-MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy.ts
+cp .env.example .env     # fill in MN_MNEMONIC (or MN_SEED) - never committed
+
+MN_ENV=preview bun run scripts/deploy.ts
 
 # or deploy and immediately lock it (dissolve the maintenance committee -
 # permanently non-upgradeable, one-way):
-MN_ENV=preview MN_MNEMONIC="your phrase" bun run scripts/deploy-and-lock.ts
+MN_ENV=preview bun run scripts/deploy-and-lock.ts
 ```
+
+Two `.env` files, opposite policies: the root `.env` holds **secrets** and is
+gitignored; [frontend/.env](frontend/.env) holds only **public contract
+addresses** and is committed (the deployed address lives in git history).
 
 ## Locking the contract
 
@@ -88,9 +96,11 @@ Locking installs an **empty committee at threshold 1**. No signature set can eve
 - `scripts/lock.ts` - lock a contract that's already deployed (e.g. one you deployed and tested live first). Run it with `DRY_RUN=1` first to confirm the maintenance signing key is present and the contract is lockable without submitting anything:
 
   ```bash
-  DRY_RUN=1 MN_ENV=preview MN_MNEMONIC="your phrase" CV_ADDRESS=<hex> bun run scripts/lock.ts
-  MN_ENV=preview MN_MNEMONIC="your phrase" CV_ADDRESS=<hex> bun run scripts/lock.ts
+  DRY_RUN=1 MN_ENV=preview CV_ADDRESS=<hex> bun run scripts/lock.ts
+  MN_ENV=preview CV_ADDRESS=<hex> bun run scripts/lock.ts
   ```
+
+  (Credentials come from the root `.env`, as with the deploy scripts.)
 
   Locking needs the maintenance signing key generated at deploy time, so run it with the **same wallet you deployed with** (the key lives in this machine's `midnight-level-db`).
 

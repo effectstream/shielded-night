@@ -15,7 +15,11 @@
  *   MN_ENV       preview | preprod | undeployed | qanet   (default: preview)
  *   MN_MNEMONIC  BIP-39 phrase; derived to a seed exactly as Lace does
  *   MN_SEED      raw hex seed (alternative to MN_MNEMONIC)
+ *
+ * MN_MNEMONIC / MN_SEED can live in the repo-root .env (gitignored; see
+ * .env.example) instead of the shell - the shell still takes precedence.
  */
+import './load-env.js';
 import { validateMnemonic } from '@midnightntwrk/wallet-sdk';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import { isEnvName, networkFor, type EnvName, GENESIS_MINT_SEED } from '../test/support/network.js';
