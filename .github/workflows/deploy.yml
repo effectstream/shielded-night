@@ -1,0 +1,70 @@
+name: Deploy frontend
+
+# Manual only. Nothing ships on a push or a merge — a deploy is always an
+# explicit click, on an explicit ref.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Cloudflare Pages branch — "main" is the production URL (shielded-night.pages.dev); anything else gets a throwaway preview URL.'
+        type: string
+        default: 'preview'
+        required: true
+
+concurrency:
+  group: deploy-${{ github.event.inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Add required reviewers to this environment in the repo settings to gate
+    # production deploys behind an approval.
+    environment: ${{ github.event.inputs.branch == 'main' && 'production' || 'preview' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: oven-sh/setup-bun@v2
+
+      # The addresses are committed in frontend/.env on purpose (public data,
+      # git history is the audit trail). Echo them so the run log records
+      # exactly which contract this bundle points at.
+      - name: Record deployed contract addresses
+        run: |
+          echo "### Contract addresses in this build" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^[A-Z]+_ADDRESS=' frontend/.env >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # See the comment in ci.yml's frontend job: both installs are required for
+      # the vite dedupe to be exercised rather than bypassed.
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Typecheck
+        run: bun run typecheck
+        working-directory: frontend
+
+      - name: Build
+        run: bun run build
+        working-directory: frontend
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy frontend/dist
+            --project-name shielded-night
+            --branch ${{ github.event.inputs.branch }}

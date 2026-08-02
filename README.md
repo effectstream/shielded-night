@@ -53,7 +53,9 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 │       ├── components/              # WalletBar, SwapCard, BalancePanel, PendingSwaps, ActivityLog
 │       ├── hooks/useShieldedNight.ts        # connect, providers, balances, state
 │       └── lib/                     # connector, providers, walletAdapter, contract, swap, tokens, networks
-├── .github/workflows/ci.yml         # unit + integration CI
+├── .github/workflows/
+│   ├── ci.yml                       # unit, frontend, byte-exact rebuild, integration
+│   └── deploy.yml                   # manual-only frontend deploy to Cloudflare Pages
 ├── TESTING.md
 └── README.md
 ```
@@ -161,4 +163,26 @@ bun run compact:fast && bun run test:unit     # simulator unit tests, no infra, 
 bun run compact && bun run test:integration   # docker stack: node + indexer + proof server, minutes
 ```
 
-Unit tests run every circuit against an in-memory context, including security and border cases for both the atomic and two-step paths. Integration tests deploy to a local stack and cover the full round trip both directions (atomic and two-step), negative paths, on-chain attack vectors (forged, inflated, and double-spent coins; nonce-replay minting; the solvency invariant), multi-party circulation, and the maintenance-authority lock. CI runs both tiers on every push (`.github/workflows/ci.yml`).
+Unit tests run every circuit against an in-memory context, including security and border cases for both the atomic and two-step paths. Integration tests deploy to a local stack and cover the full round trip both directions (atomic and two-step), negative paths, on-chain attack vectors (forged, inflated, and double-spent coins; nonce-replay minting; the solvency invariant), multi-party circulation, and the maintenance-authority lock.
+
+## CI / CD
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push to `main`, every PR, and on demand:
+
+| Job | What it guards |
+| --- | --- |
+| **Unit tests** | Every circuit against the in-memory simulator, plus a repo-wide typecheck. Seconds. |
+| **Frontend** | `tsc --noEmit` and a real `vite build`. Installs **both** the root and frontend dependency trees on purpose — the compiled contract is imported from outside the frontend package root, so that is the only way the `resolve.dedupe` protection against duplicate WASM instances is actually exercised rather than bypassed. |
+| **Byte-exact rebuild** | Recompiles `src/shielded-night.compact` from scratch and asserts `src/managed/` is unchanged. Deliberately uncached — restoring the artifacts would compare them against themselves. This is what backs the verifiability claim above. Slow (full ZK key generation). |
+| **Integration tests** | Full docker stack: node + indexer + proof server. |
+
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and ships it to Cloudflare Pages. It is **`workflow_dispatch` only** — nothing deploys on a merge. The `branch` input picks the target: `main` is the production URL, anything else (default `preview`) gets a throwaway preview URL. The run summary records the contract addresses baked into the bundle.
+
+It needs two repository secrets:
+
+| Secret | Where to get it |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens, using the **Edit Cloudflare Workers** template (Pages deploys use the same permission). |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages, in the right-hand sidebar. |
+
+Each `branch` value maps to a GitHub environment (`production` / `preview`), so production deploys can be put behind required reviewers in the repo's environment settings.

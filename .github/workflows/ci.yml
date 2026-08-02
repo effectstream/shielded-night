@@ -45,6 +45,75 @@ jobs:
       - name: Run unit tests
         run: bun run test:unit
 
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: oven-sh/setup-bun@v2
+
+      # Both installs matter. The frontend imports the compiled contract from
+      # ../src/managed (outside its package root), so root node_modules is what
+      # Rollup would resolve the WASM-bearing midnight packages from for those
+      # files — a second physical copy whose classes fail the app's instanceof
+      # checks. vite.config.ts `resolve.dedupe` is the fix; installing ONLY the
+      # frontend deps would remove the second copy and make the build pass
+      # trivially, testing nothing. Install both to reproduce the real thing.
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+        working-directory: frontend
+
+      # No compact compile: src/managed is committed, and vite copies it into
+      # dist/contract/compiled for FetchZkConfigProvider.
+      - name: Typecheck
+        run: bun run typecheck
+        working-directory: frontend
+
+      - name: Build
+        run: bun run build
+        working-directory: frontend
+
+  reproducible-build:
+    name: Byte-exact contract rebuild
+    runs-on: ubuntu-latest
+    # Full ZK key generation for every circuit — minutes, not seconds.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Setup Compact compiler
+        uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
+        with:
+          compact-version: ${{ env.COMPACT_VERSION }}
+
+      # Deliberately NOT cached: restoring src/managed would compare the
+      # committed artifacts against themselves and prove nothing. This job
+      # exists to recompile from scratch. No `bun install` either — `compact`
+      # is a standalone binary and reads nothing from node_modules.
+      - name: Recompile contract from source
+        run: bun run compact
+
+      # `--intent-to-add` stages untracked paths so `git diff` reports files the
+      # compiler ADDED, not just ones it changed or removed.
+      - name: Assert src/managed is unchanged
+        run: |
+          git add --intent-to-add -A src/managed
+          if ! git diff --exit-code --stat -- src/managed; then
+            echo "::error::Recompiling src/shielded-night.compact with compact ${COMPACT_VERSION} did not reproduce the committed src/managed/. The deployed contract's verifiability claim (README 'Verifying the deployment') depends on this being byte-exact — commit the regenerated artifacts or investigate the toolchain difference."
+            exit 1
+          fi
+
   integration:
     name: Integration tests (docker stack)
     runs-on: ubuntu-latest
