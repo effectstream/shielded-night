@@ -85,8 +85,9 @@ jobs:
   reproducible-build:
     name: Byte-exact contract rebuild
     runs-on: ubuntu-latest
-    # Full ZK key generation for every circuit — minutes, not seconds.
-    timeout-minutes: 90
+    # Full ZK key generation for all 11 circuits measures ~15s; the headroom is
+    # for a cold compiler install.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -98,11 +99,19 @@ jobs:
           compact-version: ${{ env.COMPACT_VERSION }}
 
       # Deliberately NOT cached: restoring src/managed would compare the
-      # committed artifacts against themselves and prove nothing. This job
-      # exists to recompile from scratch. No `bun install` either — `compact`
-      # is a standalone binary and reads nothing from node_modules.
+      # committed artifacts against themselves and prove nothing. No `bun
+      # install` either — `compact` is a standalone binary and reads nothing
+      # from node_modules.
+      #
+      # Delete the artifacts first. Without this, a compiler that skipped work
+      # because its output was already present would leave the checked-out
+      # files untouched and the diff below would pass while having verified
+      # nothing — a green run indistinguishable from a real one. Compiling into
+      # an empty tree makes the assertion mean what it claims.
       - name: Recompile contract from source
-        run: bun run compact
+        run: |
+          rm -rf src/managed
+          bun run compact
 
       # `--intent-to-add` stages untracked paths so `git diff` reports files the
       # compiler ADDED, not just ones it changed or removed.

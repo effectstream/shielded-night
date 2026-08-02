@@ -173,7 +173,7 @@ Unit tests run every circuit against an in-memory context, including security an
 | --- | --- |
 | **Unit tests** | Every circuit against the in-memory simulator, plus a repo-wide typecheck. Seconds. |
 | **Frontend** | `tsc --noEmit` and a real `vite build`. Installs **both** the root and frontend dependency trees on purpose — the compiled contract is imported from outside the frontend package root, so that is the only way the `resolve.dedupe` protection against duplicate WASM instances is actually exercised rather than bypassed. |
-| **Byte-exact rebuild** | Recompiles `src/shielded-night.compact` from scratch and asserts `src/managed/` is unchanged. Deliberately uncached — restoring the artifacts would compare them against themselves. This is what backs the verifiability claim above. Slow (full ZK key generation). |
+| **Byte-exact rebuild** | Deletes `src/managed/`, recompiles `src/shielded-night.compact` into the empty tree, and asserts the result is identical to what was committed. Deliberately uncached, and deliberately deleting first — either shortcut would let the job compare the artifacts against themselves and pass without verifying anything. This is what backs the verifiability claim above. ~15s. |
 | **Integration tests** | Full docker stack: node + indexer + proof server. |
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and ships it to Cloudflare Pages. It is **`workflow_dispatch` only** — nothing deploys on a merge. The `branch` input picks the target: `main` is the production URL, anything else (default `preview`) gets a throwaway preview URL. The run summary records the contract addresses baked into the bundle.
