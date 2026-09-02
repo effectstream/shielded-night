@@ -35,6 +35,47 @@ Secrets never go in it - deploy scripts read `MN_MNEMONIC` / `MN_SEED` from the
 shell environment. For personal overrides use `.env.local` (gitignored; Vite
 loads it over `.env`).
 
+### Runtime address override (`window.SHIELDED_NIGHT`)
+
+`.env` bakes the addresses in at BUILD time, which is right for the hosted
+networks and wrong for a deployment that brings up its own chain: an image built
+once and run against many throwaway local devnets only learns the contract
+address when the container starts. Such a deployment serves a tiny script
+BEFORE the module bundle:
+
+```html
+<!-- index.html -->
+<script src="/config.js"></script>
+```
+
+```js
+// /config.js, written at container start from the deploy record
+window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "0123…" };
+```
+
+Per network, the injected value wins over the build-time one; a blank or absent
+value falls through to `.env`, so **a build with no global behaves exactly as
+before**. The keys are the same names as the env vars: `PREVIEW_ADDRESS`,
+`PREPROD_ADDRESS`, `MAINNET_ADDRESS`, `UNDEPLOYED_ADDRESS`. The dropdown follows
+suit — inject `UNDEPLOYED_ADDRESS` and "Local (undeployed)" appears in a bundle
+built without one.
+
+Only ADDRESSES are injectable. The wallet still supplies the indexer / node /
+proof-server URLs (`getConfiguration()`), so a stack on non-default ports needs
+no URL lane in the page — one reason there is nothing else to get wrong.
+
+Packaging note: the literal `SHIELDED_NIGHT` is a property name on `window`, so
+it survives minification and appears verbatim in the built bundle. An image that
+injects `/config.js` can prove the lane is present in the build it ships instead
+of trusting it:
+
+```bash
+grep -q SHIELDED_NIGHT dist/assets/*.js   # fail the build if the override is gone
+```
+
+See [src/lib/runtime-config.ts](src/lib/runtime-config.ts); the behaviour is
+pinned by `test/unit/runtime-config.unit.test.ts` in the repo root's unit tier.
+
 ## How it works
 
 Each conversion is **two transactions** with a pool credit keyed by a
