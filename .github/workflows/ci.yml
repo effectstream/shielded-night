@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `main` is the 1.x/preview line; `ledger-v9` is the long-lived Midnight 2.x port
+    # (see README "Two lines"). Both get full CI on every push.
+    branches: [main, ledger-v9]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  COMPACT_VERSION: '0.31.1'
+  # ledger-v9 line: toolchain 0.34.0 = compactc 0.34.0, language 0.26.0,
+  # compact-runtime 0.19.0, ledger 9. MUST equal the `pragma language_version`
+  # in src/shielded-night.compact and the `+version` in package.json's compact
+  # scripts, or the byte-exact rebuild job below is meaningless.
+  # (`main` pins 0.31.1 / language 0.23.)
+  COMPACT_VERSION: '0.34.0'
 
 jobs:
   unit:
@@ -85,8 +92,8 @@ jobs:
   reproducible-build:
     name: Byte-exact contract rebuild
     runs-on: ubuntu-latest
-    # Full ZK key generation for all 11 circuits measures ~15s; the headroom is
-    # for a cold compiler install.
+    # Full ZK key generation for all 11 circuits measures ~14s on 0.34.0; the
+    # headroom is for a cold compiler install.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

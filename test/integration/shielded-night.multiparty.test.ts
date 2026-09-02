@@ -16,9 +16,9 @@ import {
   waitForShieldedBalance,
   waitForUnshieldedBalance,
 } from '../support/wallet-observations.js';
-import * as ledgerV8 from '@midnight-ntwrk/ledger-v8';
+import * as ledgerV9 from '@midnightntwrk/ledger-v9';
 
-const NIGHT_HEX = ledgerV8.unshieldedToken().raw;
+const NIGHT_HEX = ledgerV9.unshieldedToken().raw;
 
 const A_DEPOSIT = 1_000_000n; // A deposits this much native NIGHT
 const A_MINT = 200_000n; // A withdraws this much as the shielded wrapper

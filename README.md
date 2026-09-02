@@ -1,5 +1,23 @@
 # Shielded NIGHT
 
+> **You are on the `ledger-v9` branch — the Midnight 2.x line.**
+>
+> | Branch | Midnight line | Toolchain | Stack | Status |
+> |---|---|---|---|---|
+> | `main` | **1.x** (preview / preprod / mainnet) | compactc 0.31.1, language 0.23, compact-runtime 0.16.0, `@midnight-ntwrk/ledger-v8` 8.1.0, midnight-js 4.1.1 | node 1.0.0 / indexer-standalone 4.3.3 / proof-server 8.1.0 | what https://shielded-night.pages.dev runs |
+> | **`ledger-v9`** (here) | **2.x** | compactc **0.34.0**, language **0.26.0**, compact-runtime **0.19.0**, `@midnightntwrk/ledger-v9` 1.0.0-rc.3, midnight-js 5.0.0-beta.7 | node **2.0.0-rc.4** / indexer-standalone **4.4.0-rc.1** / proof-server **9.0.0-rc.5** | long-lived branch; **merged into `main` when the Midnight network moves to 2.x** |
+>
+> The two lines are kept separate on purpose: one dependency tree cannot hold both ledger
+> wasm modules (two copies give two class identities and every cross-copy `instanceof`
+> fails — the reason both `package.json`s carry an `overrides` block). Nothing in this
+> branch is deployed to a public network; it targets a local `undeployed` devnet and the
+> `midnight-2-offers` demo stack.
+>
+> **The contract source is unchanged apart from its `pragma language_version`, and all 33
+> ZK artifacts (11 circuits × prover/verifier/bzkir) are byte-identical to the `main`
+> build** — so the deployed preview contract's verifier keys remain valid; only the
+> generated TypeScript bindings differ.
+
 Convert native **unshielded NIGHT** into **shielded sNight** (a contract-minted wrapper token) and back, on Midnight.
 
 Live (preview): https://shielded-night.pages.dev
@@ -151,11 +169,11 @@ Anyone can check, without trusting us, that (1) the deployed contract is exactly
 
 ### 1. Reproduce the compiled artifacts byte-for-byte
 
-The compiler output is deterministic and the contract pins its language version (`pragma language_version 0.23`), so compiling [src/shielded-night.compact](src/shielded-night.compact) with the pinned toolchain reproduces [src/managed/](src/managed/) exactly:
+The compiler output is deterministic and the contract pins its language version (`pragma language_version 0.26` on this branch; `0.23` on `main`), so compiling [src/shielded-night.compact](src/shielded-night.compact) with the pinned toolchain reproduces [src/managed/](src/managed/) exactly:
 
 ```bash
 # Install the Compact toolchain (once): https://docs.midnight.network/relnotes/compact-tools
-compact update 0.31.1      # toolchain 0.31.1 = compactc 0.31.101, language 0.23.101
+compact update 0.34.0      # toolchain 0.34.0 = compactc 0.34.0, language 0.26.0, runtime 0.19.0, ledger 9
 
 bun install
 bun run compact            # recompiles src/shielded-night.compact -> src/managed/

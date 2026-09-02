@@ -7,7 +7,7 @@ import {
   type Proof,
   type SignatureEnabled,
   Transaction,
-} from '@midnight-ntwrk/ledger-v8';
+} from '@midnightntwrk/ledger-v9';
 import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
 import { Cause } from 'effect';
 import type { ShieldedAddress } from './providers';

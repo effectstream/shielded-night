@@ -1,0 +1,258 @@
+{
+  "manifest-version": "1",
+  "compiler-version": "0.34.0",
+  "language-version": "0.26.0",
+  "runtime-version": "0.19.0",
+  "compiler": {
+    "type": "directory",
+    "contract-info.json": {
+      "type": "file",
+      "size": 10824,
+      "hash": "4be77d9071bc7df292cd47a8c0b592647164faf581676ea713c82f0f7db33bf0"
+    }
+  },
+  "contract": {
+    "type": "directory",
+    "index.d.ts": {
+      "type": "file",
+      "size": 10829,
+      "hash": "8245a78e2fd8eef31d71263a5e051aabac69e76643aa8b76e59e7ab24a8e9da3"
+    },
+    "index.js": {
+      "type": "file",
+      "size": 128904,
+      "hash": "9676327416b39508f0f8e914fd8005458fe2ada4cc112e1a15ab983d9182d3a7"
+    },
+    "index.js.map": {
+      "type": "file",
+      "size": 6134,
+      "hash": "ce51c8aef4750cc18f1a03b28a3140dce06169a3bf740ad66399081df7e9b662"
+    }
+  },
+  "zkir": {
+    "type": "directory",
+    "convertToShielded.bzkir": {
+      "type": "file",
+      "size": 608,
+      "hash": "d18d0a123c07e091e8399c9038cec0d196ac6d690175b018829483898bb4dc8d"
+    },
+    "convertToShielded.zkir": {
+      "type": "file",
+      "size": 8848,
+      "hash": "46ffbeb4fea6fdb8f62cf3bf3a343fa5efdfdd0b2bb5cc3e6000292d5c57e40b"
+    },
+    "convertToUnshielded.bzkir": {
+      "type": "file",
+      "size": 1113,
+      "hash": "322e44797c423f495d330b495990f7ef1f0aba3a5b970aaebf9c2040261399b4"
+    },
+    "convertToUnshielded.zkir": {
+      "type": "file",
+      "size": 16072,
+      "hash": "510e51237aeef4384631fe03b49c96013b92d120a7e831b0fb6e307a8e209310"
+    },
+    "decimals.bzkir": {
+      "type": "file",
+      "size": 71,
+      "hash": "bcba28c871a59908f3949f670c82ece40b30a8c5405eda14e39ba8636480c71f"
+    },
+    "decimals.zkir": {
+      "type": "file",
+      "size": 953,
+      "hash": "ea3d2d1a65f5388d28645fd4c0fa4a1f9d516e01a164c4e2e7138aa82fb95fb9"
+    },
+    "depositShielded.bzkir": {
+      "type": "file",
+      "size": 930,
+      "hash": "73f91b44a64c982c130a54bb10fbc22da242ca7a9560711729a740be82259ac1"
+    },
+    "depositShielded.zkir": {
+      "type": "file",
+      "size": 13821,
+      "hash": "16e7d5ada1adea0dd09e9203574fe898fa2ae3198272fda84b12cfbc06507558"
+    },
+    "depositUnshielded.bzkir": {
+      "type": "file",
+      "size": 576,
+      "hash": "bbeb4e4e56b498ba769089bd8f8c26e515dee25166831e9a1d44a98594714d58"
+    },
+    "depositUnshielded.zkir": {
+      "type": "file",
+      "size": 8859,
+      "hash": "274f10abffd9ffd00c191b34ec4d658b0eb57336f8e563630bd82a1980b201ee"
+    },
+    "getBalance.bzkir": {
+      "type": "file",
+      "size": 131,
+      "hash": "c9cfcae07512a89916bc6baba36f189ac2927a7007687e0b4232fc6972c6d86e"
+    },
+    "getBalance.zkir": {
+      "type": "file",
+      "size": 1694,
+      "hash": "ce9fea83599adf8ff4e2c66f431f585d5013662a467112fd41d48c0d6ef071de"
+    },
+    "name.bzkir": {
+      "type": "file",
+      "size": 103,
+      "hash": "7663272ca075a1e6d0d0502251cc8224e92a4576eb40ebbebeb14ce5206ffb56"
+    },
+    "name.zkir": {
+      "type": "file",
+      "size": 954,
+      "hash": "8e8597767f0199f401448d572f251356cfb9ae15ecf364430e7c949650c55893"
+    },
+    "symbol.bzkir": {
+      "type": "file",
+      "size": 105,
+      "hash": "0c0165a89e575ffc4e53fc5c04b7ce9496a081a874914af06c89c78d4e20c2fb"
+    },
+    "symbol.zkir": {
+      "type": "file",
+      "size": 993,
+      "hash": "53a787199d7441b40e651f0bf8d5bc7e672d02d34ac8ea1b6d47bf7534694cf3"
+    },
+    "tokenColor.bzkir": {
+      "type": "file",
+      "size": 141,
+      "hash": "a5ca334193560fb755c20a91bd6675e2cf865b5cad480d9e755e257b1d026a86"
+    },
+    "tokenColor.zkir": {
+      "type": "file",
+      "size": 1542,
+      "hash": "60168cbd0bef54494966388e3f672dd108f78a9d4c8aae15522e41f632f26ace"
+    },
+    "withdrawShielded.bzkir": {
+      "type": "file",
+      "size": 711,
+      "hash": "1c7c58003085134023c4002a6beb899dafd6f45986e98ed157fac3cb5d154b3b"
+    },
+    "withdrawShielded.zkir": {
+      "type": "file",
+      "size": 10348,
+      "hash": "5e73ba4f7765db4ac8c5f9758e6d1f56b5bcae0cae073ef051f31a9016571640"
+    },
+    "withdrawUnshielded.bzkir": {
+      "type": "file",
+      "size": 1097,
+      "hash": "96ec6dd5aaa8753a8da11618706166fc7373664ba87fd4169febb9b5d9b10eb8"
+    },
+    "withdrawUnshielded.zkir": {
+      "type": "file",
+      "size": 16165,
+      "hash": "2de2779327d878142f7349bdd4c8ffac20651dd883f42ddce9ff9c18d99de9dc"
+    }
+  },
+  "keys": {
+    "type": "directory",
+    "convertToShielded.prover": {
+      "type": "file",
+      "size": 5204863,
+      "hash": "39732387554c10974a04365dfc5e46f4f024f5f426752d850b0b124b66c77711"
+    },
+    "convertToShielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "ceb794f4a07d5d0f4a200a364cc6334f6b3a8f08fa5a37ba3c99edac4da968eb"
+    },
+    "convertToUnshielded.prover": {
+      "type": "file",
+      "size": 5206057,
+      "hash": "fd0790325985b5afed1f88c93a1a864a12b26c6f8e50d5cc89033923b4e15911"
+    },
+    "convertToUnshielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "527e93c8b02cc14d86c625834d874556183d5e45ea615338bbe4966fb503eb4d"
+    },
+    "decimals.prover": {
+      "type": "file",
+      "size": 22436,
+      "hash": "4833687440dcc5a3b27e8af9b6442a84decfd62f07f523aef9c450af07f249eb"
+    },
+    "decimals.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "95a209a810ddd347aa984bb6c6a5c57ba66ef29b4221f1fafd3f04e1fa4fdec9"
+    },
+    "depositShielded.prover": {
+      "type": "file",
+      "size": 9994806,
+      "hash": "bf31c7665560f782d7e05e1bed238e91a9bab688c35cb55aa2129faf4f3249d6"
+    },
+    "depositShielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "50ec1aa10bc46a20ecfdaae1fb3354cff6c33dc61fa5c97b3e49e87878cba46c"
+    },
+    "depositUnshielded.prover": {
+      "type": "file",
+      "size": 2824062,
+      "hash": "dfb0813bfce8c813d2e288653a39865d1ae07b9492090cbb268d61fe36454940"
+    },
+    "depositUnshielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "72e482e604354b866f7cab1852144c091d06bd913e9a5bd8979046275d88fdc2"
+    },
+    "getBalance.prover": {
+      "type": "file",
+      "size": 2820035,
+      "hash": "33b24cefc9a26ed21b4c1f6d8f8b1a87d64a0a6787eef11440f88a26f06a9a26"
+    },
+    "getBalance.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "7981e85490a0d425652636da8c3b5aa9a3d998ce72ef04c16d3524dba08416bf"
+    },
+    "name.prover": {
+      "type": "file",
+      "size": 22436,
+      "hash": "b05b5111aea5700ed9f8074772535b073481137e0206581ad7ba21c2f08b14f0"
+    },
+    "name.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "b36a8137f9cb7bce5546e12d5194c5e72a8caa1b11441c35a0f2379246e04387"
+    },
+    "symbol.prover": {
+      "type": "file",
+      "size": 22434,
+      "hash": "4b84581f1f43f14bbb8eeaba4acb8a65b87e040dcf6939173779ecf78904f295"
+    },
+    "symbol.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "21005ce77566c9a7f5fed12b07c79796abd19b6d6afbc6553ae6aeb9e908b6d9"
+    },
+    "tokenColor.prover": {
+      "type": "file",
+      "size": 2814667,
+      "hash": "17525dbbe8be1e855e12adc581d89745398ef224cd62c8bb12c7fdac5b4ae7a8"
+    },
+    "tokenColor.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "904cecd3fab66d4f598eee1d90709771e735695cff5344c71cf8afc31a319b5d"
+    },
+    "withdrawShielded.prover": {
+      "type": "file",
+      "size": 5212557,
+      "hash": "0787d27d03f1bbe5b3c2f3f8b6a2144756ea52d282f52848605a75cc5b741de4"
+    },
+    "withdrawShielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "71019ebd128964628325541c6a14db941c2dbf024689525132a1e13dff457b42"
+    },
+    "withdrawUnshielded.prover": {
+      "type": "file",
+      "size": 2821823,
+      "hash": "8ea30a2e29cd2b72dc3d2bdf7088f88ad24c33c8fd457a2a1d99ad0c7b92168c"
+    },
+    "withdrawUnshielded.verifier": {
+      "type": "file",
+      "size": 2119,
+      "hash": "b04e3748e1b1146648f490531eabf874f6fa8bb1331680c458b234125a590a37"
+    }
+  }
+}

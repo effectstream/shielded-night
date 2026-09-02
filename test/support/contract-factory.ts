@@ -1,7 +1,7 @@
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { CompiledContract, type ProvableCircuitId } from '@midnight-ntwrk/compact-js';
 import type { Contract } from '@midnight-ntwrk/compact-js/effect/Contract';
-import type { ChargedState } from '@midnight-ntwrk/ledger-v8';
+import type { ChargedState } from '@midnightntwrk/ledger-v9';
 import type { Types } from 'effect';
 import {
   deployContract,

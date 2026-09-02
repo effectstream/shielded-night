@@ -1,4 +1,4 @@
-import { type FinalizedTransaction } from '@midnight-ntwrk/ledger-v8';
+import { type FinalizedTransaction } from '@midnightntwrk/ledger-v9';
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
@@ -26,9 +26,9 @@ export const createWalletAndMidnightProvider = async (
         { shieldedSecretKeys: ctx.shieldedSecretKeys, dustSecretKey: ctx.dustSecretKey },
         { ttl: ttl ?? new Date(Date.now() + 30 * 60 * 1000) },
       );
-      const signed = await ctx.wallet.signRecipe(recipe, (payload: Uint8Array) =>
-        ctx.unshieldedKeystore.signData(payload),
-      );
+      // ledger-v9: `SignSegment` is `(data) => Promise<Signature>`; the keystore's own
+      // `signDataAsync` is the sanctioned adapter over the synchronous `signData`.
+      const signed = await ctx.wallet.signRecipe(recipe, ctx.unshieldedKeystore.signDataAsync);
       return ctx.wallet.finalizeRecipe(signed);
     },
     submitTx(tx: FinalizedTransaction) {

@@ -1,5 +1,5 @@
-import * as ledger from '@midnight-ntwrk/ledger-v8';
-import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
+import { unshieldedToken } from '@midnightntwrk/ledger-v9';
 import { getNetworkId, setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import { toHex } from '@midnight-ntwrk/midnight-js/utils';
 // Single coherent wallet SDK via the barrel package — it re-exports the whole version-locked family, so we avoid
@@ -21,6 +21,7 @@ import {
   TransactionHistoryStorage,
   UnshieldedAddress,
   type UnshieldedKeystore,
+  type UnshieldedSecretKey,
   UnshieldedWallet,
   WalletFacade,
 } from '@midnightntwrk/wallet-sdk';
@@ -115,6 +116,17 @@ const deriveKeysFromSeed = (seed: string) => {
   return result.keys;
 };
 
+/**
+ * Wrap a raw 32-byte NIGHT secret in the `UnshieldedSecretKey` envelope the ledger-v9 keystore takes.
+ *
+ * @dev ledger-v9 turned `SigningKey`/`SignatureVerifyingKey`/`Signature` from bare hex strings into
+ * `{ tag: SignatureKind, value: string }`, so `createKeystore` no longer accepts raw bytes. `schnorr`
+ * (BIP-340) is the kind ledger-v8 signed with implicitly, so it is what reproduces the SAME addresses
+ * this repo's `undeployed` seeds derived on the v8 line — anything else would silently derive a
+ * different, unfunded wallet.
+ */
+const unshieldedSecretKey = (secret: Uint8Array): UnshieldedSecretKey => ({ kind: 'schnorr', secret });
+
 const buildShieldedConfig = (cfg: NetworkConfig) => ({
   networkId: getNetworkId(),
   indexerClientConnection: { indexerHttpUrl: cfg.indexer, indexerWsUrl: cfg.indexerWS },
@@ -125,7 +137,7 @@ const buildShieldedConfig = (cfg: NetworkConfig) => ({
 const buildUnshieldedConfig = (cfg: NetworkConfig) => ({
   networkId: getNetworkId(),
   indexerClientConnection: { indexerHttpUrl: cfg.indexer, indexerWsUrl: cfg.indexerWS },
-  txHistoryStorage: new InMemoryTransactionHistoryStorage(TransactionHistoryStorage.TransactionHistoryCommonSchema),
+  txHistoryStorage: new InMemoryTransactionHistoryStorage(TransactionHistoryStorage.TransactionHistoryEntryCommonSchema),
 });
 
 const buildDustConfig = (cfg: NetworkConfig) => ({
@@ -316,7 +328,7 @@ const registerForDustGeneration = async (
   const recipe = await wallet.registerNightUtxosForDustGeneration(
     nightUtxos,
     unshieldedKeystore.getPublicKey(),
-    (payload) => unshieldedKeystore.signData(payload),
+    unshieldedKeystore.signDataAsync,
   );
   const finalized = await wallet.finalizeRecipe(recipe);
   await wallet.submitTransaction(finalized);
@@ -345,7 +357,7 @@ export const buildWallet = async (
   const keys = deriveKeysFromSeed(seed);
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(keys[Roles.Zswap]);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(keys[Roles.Dust]);
-  const unshieldedKeystore = createKeystore(keys[Roles.NightExternal], getNetworkId());
+  const unshieldedKeystore = createKeystore(unshieldedSecretKey(keys[Roles.NightExternal]), getNetworkId());
 
   const walletConfig = {
     ...buildShieldedConfig(cfg),
@@ -564,7 +576,7 @@ export const deriveUnshieldedAddressFromSeed = (
   seed: string,
 ): { readonly encoded: string; readonly bytes: Uint8Array } => {
   const keys = deriveKeysFromSeed(seed);
-  const keystore = createKeystore(keys[Roles.NightExternal], getNetworkId());
+  const keystore = createKeystore(unshieldedSecretKey(keys[Roles.NightExternal]), getNetworkId());
   const bech = keystore.getBech32Address();
   return { encoded: bech.asString(), bytes: bech.data };
 };

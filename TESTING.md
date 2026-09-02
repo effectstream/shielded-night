@@ -12,7 +12,7 @@ reference suites:
 
 - Node 22+ (vitest runs under Node; bun is the package manager)
 - `bun install`
-- The `compact` CLI (the scripts pin compiler `0.31.1`)
+- The `compact` CLI (this branch's scripts pin compiler `0.34.0`; `main` pins `0.31.1`)
 - Docker running (integration tier only)
 
 ## Unit tests
@@ -36,8 +36,9 @@ bun run test:integration
 ```
 
 `test/integration/global-setup.ts` boots the docker stack
-(`envs/docker-compose-dynamic.yml`: midnight-node 1.0.0, indexer-standalone
-4.3.3, proof-server 8.1.0) via testcontainers, then the suite deploys the
+(`envs/docker-compose-dynamic.yml`: on this `ledger-v9` branch midnight-node
+2.0.0-rc.4, indexer-standalone 4.4.0-rc.1, proof-server 9.0.0-rc.5 — the Midnight
+2.x triple; `main` runs 1.0.0 / 4.3.3 / 8.1.0) via testcontainers, then the suite deploys the
 contract with the genesis wallet and runs the full README round trip
 (depositUnshielded → withdrawShielded → depositShielded → withdrawUnshielded),
 the negative paths, and a two-wallet independence test.
@@ -158,8 +159,8 @@ locked (this guard was added by this suite; see git history).
 via `sendImmediateShielded` in the same transaction (a transient), so the
 wrapper supply is elastic both ways: minted on withdraw, burnt on deposit.
 [test/integration/shielded-night.transient.test.ts](test/integration/shielded-night.transient.test.ts)
-pins the fixed behavior on the current stack (toolchain 0.31.101 / ledger-v8
-8.1.0): the transaction applies, the credit equals the coin value, the **wallet
+pins the fixed behavior on the current stack (on `main`, toolchain 0.31.101 /
+ledger-v8 8.1.0; on `ledger-v9`, toolchain 0.34.0 / ledger-v9 1.0.0-rc.3): the transaction applies, the credit equals the coin value, the **wallet
 sees the coin as spent** (the historical bug left the spent UTXO listed as
 spendable, corrupting wallet state), and the credit withdraws again cleanly.
 

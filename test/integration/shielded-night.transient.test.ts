@@ -12,7 +12,7 @@ import {
 /**
  * `depositShielded` burns the received coin via `sendImmediateShielded` — a
  * same-transaction transient. Older wallet stacks mis-listed the result (the
- * spent input UTXO still showed as spendable); toolchain 0.31.101 / ledger-v8
+ * spent input UTXO still showed as spendable); toolchain 0.31.101 / ledger-v8 (v9 branch: 0.34.0 / ledger-v9)
  * 8.1.0 fixed that. These tests pin the fix, separating three questions:
  *
  * 1. Does the transaction build, balance, and apply on the current stack?

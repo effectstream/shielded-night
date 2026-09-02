@@ -26,55 +26,55 @@ const ZERO32 = new Uint8Array(32);
 
 describe('ShieldedNight combined circuits (simulator)', () => {
   let contract: ShieldedNightSimulator;
-  beforeEach(() => {
-    contract = new ShieldedNightSimulator('Shielded Night', 'sNight', 6n);
+  beforeEach(async () => {
+    contract = await ShieldedNightSimulator.create('Shielded Night', 'sNight', 6n);
   });
 
   describe('convertToShielded', () => {
-    it('mints a wrapper coin of the exact amount with the contract color', () => {
-      const coin = contract.convertToShielded(N, RECIPIENT, b32('n'));
+    it('mints a wrapper coin of the exact amount with the contract color', async () => {
+      const coin = await contract.convertToShielded(N, RECIPIENT, b32('n'));
       expect(coin.value).toBe(N);
-      expect(coin.color).toEqual(contract.tokenColor());
+      expect(coin.color).toEqual(await contract.tokenColor());
       expect(coin.nonce).toEqual(b32('n'));
     });
 
-    it('does not touch the credit map (no secret, atomic)', () => {
-      contract.convertToShielded(N, RECIPIENT, b32('n'));
+    it('does not touch the credit map (no secret, atomic)', async () => {
+      await contract.convertToShielded(N, RECIPIENT, b32('n'));
       expect(contract.getLedger().balances.isEmpty()).toBe(true);
     });
 
-    it('rejects a zero amount', () => {
-      expect(() => contract.convertToShielded(0n, RECIPIENT, b32('n'))).toThrow('amount must be positive');
+    it('rejects a zero amount', async () => {
+      await expect(contract.convertToShielded(0n, RECIPIENT, b32('n'))).rejects.toThrow('amount must be positive');
     });
 
-    it('rejects the zero recipient (burn address)', () => {
-      expect(() => contract.convertToShielded(N, { bytes: ZERO32 }, b32('n'))).toThrow('invalid recipient');
+    it('rejects the zero recipient (burn address)', async () => {
+      await expect(contract.convertToShielded(N, { bytes: ZERO32 }, b32('n'))).rejects.toThrow('invalid recipient');
     });
   });
 
   describe('convertToUnshielded', () => {
     let coin: ShieldedCoin;
-    beforeEach(() => {
-      coin = contract.convertToShielded(N, RECIPIENT, b32('n'));
+    beforeEach(async () => {
+      coin = await contract.convertToShielded(N, RECIPIENT, b32('n'));
     });
 
-    it('accepts a wrapper coin and releases NIGHT (no throw, no credit touched)', () => {
-      expect(() => contract.convertToUnshielded(coin, USER)).not.toThrow();
+    it('accepts a wrapper coin and releases NIGHT (no throw, no credit touched)', async () => {
+      await expect(contract.convertToUnshielded(coin, USER)).resolves.not.toThrow();
       expect(contract.getLedger().balances.isEmpty()).toBe(true);
     });
 
-    it('rejects a coin that is not the contract wrapper', () => {
+    it('rejects a coin that is not the contract wrapper', async () => {
       const foreign = { ...coin, color: coin.color.slice() };
       foreign.color[0] ^= 0xff;
-      expect(() => contract.convertToUnshielded(foreign, USER)).toThrow("not this contract's shielded wrapper");
+      await expect(contract.convertToUnshielded(foreign, USER)).rejects.toThrow("not this contract's shielded wrapper");
     });
 
-    it('rejects a zero-value coin', () => {
-      expect(() => contract.convertToUnshielded({ ...coin, value: 0n }, USER)).toThrow('coin value must be positive');
+    it('rejects a zero-value coin', async () => {
+      await expect(contract.convertToUnshielded({ ...coin, value: 0n }, USER)).rejects.toThrow('coin value must be positive');
     });
 
-    it('rejects the zero unshielded recipient', () => {
-      expect(() => contract.convertToUnshielded(coin, rightUserAddress(ZERO32))).toThrow('invalid recipient');
+    it('rejects the zero unshielded recipient', async () => {
+      await expect(contract.convertToUnshielded(coin, rightUserAddress(ZERO32))).rejects.toThrow('invalid recipient');
     });
   });
 });

@@ -1,4 +1,4 @@
-import * as ledgerV8 from '@midnight-ntwrk/ledger-v8';
+import * as ledgerV9 from '@midnightntwrk/ledger-v9';
 import { describe, expect } from 'vitest';
 import * as contract from '../support/shielded-night.js';
 import { describeContract } from '../support/describe-contract.js';
@@ -14,7 +14,7 @@ import {
 } from '../support/wallet-observations.js';
 
 const N = 1_000_000n; // 1 NIGHT
-const NIGHT_HEX = ledgerV8.unshieldedToken().raw;
+const NIGHT_HEX = ledgerV9.unshieldedToken().raw;
 
 /**
  * The decisive experiment: can a SINGLE transaction both receive unshielded

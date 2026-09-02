@@ -1,4 +1,4 @@
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import { type FacadeState, type WalletFacade } from '@midnightntwrk/wallet-sdk';
 import * as Rx from 'rxjs';
 import { firstSyncedState, type WalletContext } from './wallet-builder.js';

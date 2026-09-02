@@ -9,8 +9,8 @@
     "./contract": "./src/managed/contract/index.js"
   },
   "scripts": {
-    "compact": "compact compile +0.31.1 src/shielded-night.compact src/managed/",
-    "compact:fast": "compact compile +0.31.1 --skip-zk src/shielded-night.compact src/managed/",
+    "compact": "compact compile +0.34.0 src/shielded-night.compact src/managed/",
+    "compact:fast": "compact compile +0.34.0 --skip-zk src/shielded-night.compact src/managed/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
@@ -19,15 +19,15 @@
     "verify:deployment": "bun run scripts/verify-deployment.ts"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-js": "^2.5.1",
-    "@midnight-ntwrk/compact-runtime": "0.16.0",
-    "@midnight-ntwrk/ledger-v8": "^8.1.0",
-    "@midnight-ntwrk/midnight-js": "^4.1.1",
-    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "^4.1.1",
-    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "^4.1.1",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider": "^4.1.1",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "^4.1.1",
-    "@midnightntwrk/wallet-sdk": "^1.2.0",
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.8",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "5.0.0-beta.7",
+    "@midnightntwrk/wallet-sdk": "2.0.0-beta.2",
     "buffer": "^6.0.3",
     "rxjs": "^7.8.1",
     "ws": "^8.19.0",
@@ -40,8 +40,24 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
-  "//overrides": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving. The note lives OUT here because bun >= 1.4.0 no longer counts a `//` key inside `overrides` as an override, so a lockfile saved with one is rejected by `--frozen-lockfile`.",
+  "//overrides": [
+    "Force a single copy of every wasm-bindgen module tree-wide: two copies give",
+    "two class identities and break `instanceof` checks during proving. On the v8",
+    "line this block pinned @midnight-ntwrk/ledger-v8; on the ledger-v9 line the",
+    "ledger moved to @midnightntwrk/ledger-v9 (NOTE the scope has no hyphen).",
+    "compact-runtime is pinned too because the versions disagree only in name:",
+    "compactc 0.34.0 emits `checkRuntimeVersion('0.19.0')` while midnight-js",
+    "5.0.0-beta.7 pins 0.19.0-rc.0. The two published tarballs differ in three",
+    "lines (the version string, its source map and package.json) and nothing",
+    "else, and the runtime guard strips the prerelease suffix — so collapsing",
+    "them onto 0.19.0 is safe and avoids a second onchain-runtime wasm copy.",
+    "onchain-runtime-v4 is pinned for the same reason one level down: today",
+    "compact-runtime's `^4.0.0-rc.3` and midnight-js-protocol's exact",
+    "`4.0.0-rc.3` agree, but a released 4.0.0 would split them."
+  ],
   "overrides": {
-    "@midnight-ntwrk/ledger-v8": "8.1.0"
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3"
   }
 }

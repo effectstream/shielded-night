@@ -1,4 +1,4 @@
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 import {
   ShieldedAddress,
   ShieldedCoinPublicKey,
@@ -105,7 +105,7 @@ export const transferShielded = async (
     { shieldedSecretKeys: from.shieldedSecretKeys, dustSecretKey: from.dustSecretKey },
     { ttl: new Date(Date.now() + DEFAULT_TTL_MS) },
   );
-  const signed = await wallet.signRecipe(recipe, (p: Uint8Array) => from.unshieldedKeystore.signData(p));
+  const signed = await wallet.signRecipe(recipe, from.unshieldedKeystore.signDataAsync);
   const finalized = await wallet.finalizeRecipe(signed);
   return wallet.submitTransaction(finalized);
 };
