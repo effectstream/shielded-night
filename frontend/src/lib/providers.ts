@@ -1,9 +1,10 @@
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { FetchZkConfigProvider } from '@midnight-ntwrk/midnight-js-fetch-zk-config-provider';
-import { createProofProvider } from '@midnight-ntwrk/midnight-js/types';
+import { createProofProvider, zkConfigToProvingKeyMaterial, ZKConfigRegistry } from '@midnight-ntwrk/midnight-js/types';
+import { ZkArtifactIntegrityError } from '@midnight-ntwrk/midnight-js/utils';
 import type { ProvingProvider as LedgerProvingProvider } from '@midnightntwrk/ledger-v9';
-import type { ConnectedAPI } from '@midnight-ntwrk/dapp-connector-api';
+import type { ConnectedAPI, ProvingProvider as ConnectorProvingProvider } from '@midnight-ntwrk/dapp-connector-api';
 import type { BlockHashConfig, BlockHeightConfig } from '@midnight-ntwrk/midnight-js/types';
 import type { ContractAddress } from '@midnightntwrk/ledger-v9';
 
@@ -109,31 +110,54 @@ const ZSWAP_MERKLE_ROOT_RETENTION_SECONDS = 3600n;
  * dApp's own `zkConfigProvider` — the identical artifacts the dApp already served and already
  * handed the wallet through `asKeyMaterialProvider()` above. Nothing private crosses the
  * boundary and nothing moves proving out of the wallet: `check` and `prove` are still the
- * wallet's. Which lane was taken is logged, never silent.
+ * wallet's, and they are delegated explicitly rather than spread, so a connector that returns a
+ * class instance keeps working. Which lane was taken is logged, never silent.
  */
 function withLookupKey(
-  provider: unknown,
+  provider: ConnectorProvingProvider,
   zkConfigProvider: FetchZkConfigProvider<ShieldedNightCircuits>,
 ): LedgerProvingProvider {
-  const p = provider as Partial<LedgerProvingProvider>;
-  if (typeof p.lookupKey === 'function') {
+  const maybe = provider as Partial<LedgerProvingProvider>;
+  if (typeof maybe.lookupKey === 'function') {
     console.info('[providers] wallet proving provider implements lookupKey (ledger-v9 native)');
-    return p as LedgerProvingProvider;
+    return maybe as LedgerProvingProvider;
   }
   console.info(
-    '[providers] wallet proving provider has no lookupKey; serving key material from the dApp\'s ' +
+    "[providers] wallet proving provider has no lookupKey; serving key material from the dApp's " +
       'own zkConfigProvider (same public artifacts already passed to getProvingProvider)',
   );
+  const lookupKey = makeKeyMaterialResolver(zkConfigProvider);
   return {
-    ...(p as LedgerProvingProvider),
-    async lookupKey(keyLocation: string) {
-      const circuitId = keyLocation.split('/').pop() as ShieldedNightCircuits;
-      const [proverKey, verifierKey, ir] = await Promise.all([
-        zkConfigProvider.getProverKey(circuitId),
-        zkConfigProvider.getVerifierKey(circuitId),
-        zkConfigProvider.getZKIR(circuitId),
-      ]);
-      return { proverKey, verifierKey, ir };
-    },
-  } as LedgerProvingProvider;
+    check: (preimage, keyLocation) => provider.check(preimage, keyLocation),
+    prove: (preimage, keyLocation, overwriteBindingInput) =>
+      provider.prove(preimage, keyLocation, overwriteBindingInput),
+    lookupKey,
+  };
+}
+
+/**
+ * The dApp-side key-material resolver, transcribed from midnight-js 5's own
+ * `makeKeyMaterialResolver` (`midnight-js-http-client-proof-provider`) so it behaves
+ * identically at the two edges that matter:
+ *
+ * - a CANONICAL contract key location resolves through the registry's verifier-key join,
+ *   not by string-slicing the location;
+ * - a protocol builtin (`midnight/...`) resolves to `undefined` — the prover supplies those —
+ *   while an integrity violation still THROWS, because "the artifact is present but stale or
+ *   tampered with" must never be masked as "no key material".
+ */
+function makeKeyMaterialResolver(
+  zkConfigProvider: FetchZkConfigProvider<ShieldedNightCircuits>,
+): LedgerProvingProvider['lookupKey'] {
+  const registry = new ZKConfigRegistry([zkConfigProvider]);
+  return async (keyLocation: string) => {
+    const resolved = await registry.resolveKeyLocation(keyLocation);
+    if (resolved !== undefined) return zkConfigToProvingKeyMaterial(resolved);
+    try {
+      return zkConfigToProvingKeyMaterial(await zkConfigProvider.get(keyLocation as ShieldedNightCircuits));
+    } catch (error) {
+      if (error instanceof ZkArtifactIntegrityError) throw error;
+      return undefined;
+    }
+  };
 }
