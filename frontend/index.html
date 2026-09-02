@@ -7,6 +7,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Runtime config (contract address per network), classic script so it
+         runs BEFORE the deferred module bundle. public/config.js is a no-op
+         placeholder; a deployment that deploys its own contract replaces it at
+         container start. See src/lib/runtime-config.ts. -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

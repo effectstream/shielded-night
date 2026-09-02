@@ -104,7 +104,7 @@ for an existing deploy, build or CI run.
 | --- | --- | --- |
 | `MN_INDEXER_URL`, `MN_INDEXER_WS_URL`, `MN_NODE_URL`, `MN_PROOF_SERVER_URL` | deploy / lock / verify scripts and the integration suite | dial a stack that is not on `127.0.0.1` — e.g. compose service hostnames from inside the same docker network. `undeployed` honours all four; hosted envs honour `MN_PROOF_SERVER_URL` only ([TESTING.md](TESTING.md)) |
 | `DEPLOY_OUT=<path>` | `scripts/deploy.ts`, `scripts/deploy-and-lock.ts` | also write the deploy as JSON — `{address, networkId, name, symbol, decimals, deployedAt, commit, locked}` — published atomically, so an automated deployment reads DATA instead of scraping stdout ([scripts/deploy-record.ts](scripts/deploy-record.ts)) |
-| `window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "…" }` | the SPA, injected before the bundle (`/config.js`) | override the built-in contract address at RUNTIME, so one image serves any stack ([frontend/README.md](frontend/README.md#runtime-address-override-windowshielded_night)) |
+| `window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "…" }` | the SPA — overwrite the built `dist/config.js`, which `index.html` already loads before the bundle | override the built-in contract address at RUNTIME, so one image serves any stack; nothing else in the build is touched ([frontend/README.md](frontend/README.md#runtime-address-override-windowshielded_night)) |
 | `MN_EXTERNAL_STACK=1` | the integration suite | run the suite against that already-running stack instead of booting one with testcontainers — the strongest e2e gate a packaging of this dApp can have ([TESTING.md](TESTING.md)) |
 
 ```bash

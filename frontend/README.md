@@ -40,16 +40,22 @@ loads it over `.env`).
 `.env` bakes the addresses in at BUILD time, which is right for the hosted
 networks and wrong for a deployment that brings up its own chain: an image built
 once and run against many throwaway local devnets only learns the contract
-address when the container starts. Such a deployment serves a tiny script
-BEFORE the module bundle:
-
-```html
-<!-- index.html -->
-<script src="/config.js"></script>
-```
+address when the container starts. So `index.html` loads `/config.js` as a
+classic script — it therefore runs BEFORE the deferred module bundle — and
+[public/config.js](public/config.js) ships a **no-op placeholder**, so every
+deployment serves a real file (never a 404, never an HTML fallback the browser
+refuses to execute):
 
 ```js
-// /config.js, written at container start from the deploy record
+// public/config.js → dist/config.js, as built
+window.SHIELDED_NIGHT = window.SHIELDED_NIGHT || {};
+```
+
+A stack-hosted deployment overwrites that one file at container start, and needs
+to touch nothing else in the build:
+
+```js
+// dist/config.js, written from the deploy record before nginx starts
 window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "0123…" };
 ```
 
