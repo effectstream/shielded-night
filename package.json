@@ -40,8 +40,8 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
+  "//overrides": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving. The note lives OUT here because bun >= 1.4.0 no longer counts a `//` key inside `overrides` as an override, so a lockfile saved with one is rejected by `--frozen-lockfile`.",
   "overrides": {
-    "//": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving.",
     "@midnight-ntwrk/ledger-v8": "8.1.0"
   }
 }
