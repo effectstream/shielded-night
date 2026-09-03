@@ -133,7 +133,23 @@ jobs:
   integration:
     name: Integration tests (docker stack)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 150, not the 60 `main` uses. MEASURED, not guessed: the suite is 1.2-1.6x
+    # slower per file on the 2.x triple than on 1.x, and 60 was already thin on
+    # `main` (its last green run spent 50.3 min of its 60 inside vitest).
+    #
+    #   file                        main (1.x)   ledger-v9 (2.x)
+    #   security.test.ts (5)          1078.7 s        1373.4 s   1.27x
+    #   shielded-night.test.ts (8)     885.7 s        1101.2 s   1.24x
+    #   multiparty.test.ts (1)         471.8 s         753.9 s   1.60x
+    #   maintenance-authority (1)      153.8 s         153.8 s   1.00x  (fixed waits)
+    #   transient.test.ts (1)          249.8 s              --
+    #   combined.test.ts (1)           180.2 s              --
+    #
+    # The first run on this branch (33693462975) was PASSING every test and was
+    # killed by the 60-minute cap partway through transient.test.ts, having
+    # finished 15 of the 17 tests. Projected total here is ~66 min of test time,
+    # so 150 leaves room for the `retry: 2` tail without hiding a real hang.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 
