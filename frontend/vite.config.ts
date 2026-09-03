@@ -29,8 +29,8 @@ export default defineConfig({
     // single instance for every importer, dev and build alike.
     dedupe: [
       '@midnight-ntwrk/compact-runtime',
-      '@midnight-ntwrk/onchain-runtime-v3',
-      '@midnight-ntwrk/ledger-v8',
+      '@midnightntwrk/onchain-runtime-v4',
+      '@midnightntwrk/ledger-v9',
       '@midnight-ntwrk/compact-js',
     ],
     alias: {

@@ -1,6 +1,17 @@
+# Local `undeployed` devnet — the Midnight 2.x triple (ledger-v9 line).
+#
+# This is the `ledger-v9` branch's stack: node 2.0.0-rc.4 / indexer-standalone 4.4.0-rc.1 /
+# proof-server 9.0.0-rc.5. (`main` runs the 1.x triple: 1.0.0 / 4.3.3 / 8.1.0.) Mirrors
+# midnight-2-offers' `compose/core.yml`, so a contract proven here proves there too.
+#
+# Host ports stay ephemeral (`127.0.0.1::<port>`) because testcontainers maps and reads
+# them; nothing addresses another service by a host port.
 services:
   proof-server:
-    image: 'midnightntwrk/proof-server:${PROOF_TAG:-8.1.0}'
+    # PLAIN, not `_experimental`: this contract is compiled without `--feature-zkir-v3`, so
+    # its keys are tagged `midnight:verifier-key[v6]` = ProofVersioned::V2, which the plain
+    # image proves. The `_experimental` build is only needed for the zkir-v3 lane.
+    image: 'midnightntwrk/proof-server:${PROOF_TAG:-9.0.0-rc.5}'
     cap_drop:
       - ALL
     security_opt:
@@ -14,37 +25,54 @@ services:
     # checks always fail. The helper waits on the listening port instead.
 
   indexer:
-    image: 'midnightntwrk/indexer-standalone:${INDEXER_TAG:-4.3.3}'
+    image: 'midnightntwrk/indexer-standalone:${INDEXER_TAG:-4.4.0-rc.1}'
+    # 4.4.0-rc.1 is published for linux/amd64 ONLY (no arm64 manifest entry), so on Apple
+    # Silicon this one service runs emulated while node and proof-server run native.
+    # Expect it to be the slowest service to come up.
+    platform: '${INDEXER_PLATFORM:-linux/amd64}'
     cap_drop:
       - ALL
     security_opt:
       - 'no-new-privileges:true'
     ports:
       - '127.0.0.1::8088'
+    volumes:
+      # config.yaml puts both sqlite files under /data (storage.cnn_url = /data/indexer.sqlite,
+      # ledger_db.cnn_url = /data/ledger-db.sqlite).
+      - indexer-data:/data
     environment:
       RUST_LOG: 'indexer=info,chain_indexer=info,indexer_api=info,wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info'
       APP__APPLICATION__NETWORK_ID: 'undeployed'
       APP__INFRA__NODE__URL: 'ws://node:9944'
-      APP__INFRA__STORAGE__PASSWORD: 'indexer'
-      APP__INFRA__PUB_SUB__PASSWORD: 'indexer'
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: 'indexer'
+      # NOTE vs the 4.3.x stack on `main`: APP__INFRA__STORAGE__PASSWORD,
+      # APP__INFRA__PUB_SUB__PASSWORD and APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD are GONE
+      # in 4.4 — standalone now uses embedded sqlite for all three, and supplying the old keys
+      # is at best inert.
       APP__INFRA__SECRET: '303132333435363738393031323334353637383930313233343536373839303132'
+      # indexer >=4.3 opens a SECOND (SPO) connection with its own URL. Left at the config
+      # default it dials ws://localhost:9944 inside this container, never connects, burns its
+      # reconnect budget and the WHOLE indexer exits after ~5 minutes.
       APP__INFRA__SPO_NODE__URL: 'ws://node:9944'
+      # Must be a non-empty string or startup fails outright. SPO features are unused here.
       APP__INFRA__SPO_NODE__BLOCKFROST_ID: 'e2e-test-dummy-id'
+      # Belt and braces for the same failure mode: cap the backoff so high that the reconnect
+      # budget (reconnect_max_attempts: 30) can never be exhausted during a test run.
+      APP__INFRA__SPO_NODE__RECONNECT_MAX_DELAY: '24h'
     healthcheck:
       # NOTE: the indexer-standalone image has neither curl nor wget, so an HTTP `/ready` probe can never pass and the
       # container stays "unhealthy" → testcontainers aborts startup. Use the file the indexer writes when running.
       test: ['CMD-SHELL', 'cat /var/run/indexer-standalone/running']
       interval: 5s
       timeout: 5s
-      retries: 36
-      start_period: 60s
+      # Emulated on arm64, so give it more room than the 4.3.3 stack needed.
+      retries: 60
+      start_period: 30s
     depends_on:
       node:
         condition: service_healthy
 
   node:
-    image: 'midnightntwrk/midnight-node:${NODE_TAG:-1.0.0}'
+    image: 'midnightntwrk/midnight-node:${NODE_TAG:-2.0.0-rc.4}'
     cap_drop:
       - ALL
     cap_add:
@@ -56,7 +84,9 @@ services:
     ports:
       - '127.0.0.1::9944'
     volumes:
-      - node-data:/data
+      # MUST be /node, not /data: the 2.x image sets BASE_PATH=/node/chain, so a volume at
+      # /data would leave the chain db on the container's writable layer.
+      - node-data:/node
     healthcheck:
       test:
         - 'CMD-SHELL'
@@ -66,10 +96,16 @@ services:
           '"result":"0x'
       interval: 2s
       timeout: 5s
-      retries: 30
+      retries: 45
       start_period: 5s
     environment:
       CFG_PRESET: 'dev'
       SIDECHAIN_BLOCK_BENEFICIARY: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e'
+      # The node gracefully terminates when free space on the db volume drops below
+      # `threshold` MiB (default 512); 0 disables the monitor.
+      THRESHOLD: '0'
+      RUST_BACKTRACE: '1'
 volumes:
   node-data:
+  # A ledger v8→v9 chain cannot be upgraded in place, so these are wiped together.
+  indexer-data:

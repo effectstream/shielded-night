@@ -4,40 +4,40 @@ export type Witnesses<PS> = {
 }
 
 export type ImpureCircuits<PS> = {
-  name(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  symbol(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  decimals(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, bigint>;
-  tokenColor(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  name(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  symbol(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  decimals(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
+  tokenColor(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, Uint8Array>>;
   depositUnshielded(context: __compactRuntime.CircuitContext<PS>,
                     secret_0: Uint8Array,
-                    amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+                    amount_0: bigint): Promise<__compactRuntime.CircuitResults<PS, []>>;
   depositShielded(context: __compactRuntime.CircuitContext<PS>,
                   secret_0: Uint8Array,
                   coin_0: { nonce: Uint8Array, color: Uint8Array, value: bigint
-                          }): __compactRuntime.CircuitResults<PS, []>;
+                          }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawUnshielded(context: __compactRuntime.CircuitContext<PS>,
                      secret_0: Uint8Array,
                      amount_0: bigint,
                      recipient_0: { is_left: boolean,
                                     left: { bytes: Uint8Array },
                                     right: { bytes: Uint8Array }
-                                  }): __compactRuntime.CircuitResults<PS, []>;
+                                  }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawShielded(context: __compactRuntime.CircuitContext<PS>,
                    secret_0: Uint8Array,
                    amount_0: bigint,
                    recipient_0: { bytes: Uint8Array },
-                   nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                               color: Uint8Array,
-                                                                               value: bigint
-                                                                             }>;
-  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+                   nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                       color: Uint8Array,
+                                                                                       value: bigint
+                                                                                     }>>;
+  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
   convertToShielded(context: __compactRuntime.CircuitContext<PS>,
                     amount_0: bigint,
                     recipient_0: { bytes: Uint8Array },
-                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                                color: Uint8Array,
-                                                                                value: bigint
-                                                                              }>;
+                    nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                        color: Uint8Array,
+                                                                                        value: bigint
+                                                                                      }>>;
   convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
                       coin_0: { nonce: Uint8Array,
                                 color: Uint8Array,
@@ -46,44 +46,44 @@ export type ImpureCircuits<PS> = {
                       recipient_0: { is_left: boolean,
                                      left: { bytes: Uint8Array },
                                      right: { bytes: Uint8Array }
-                                   }): __compactRuntime.CircuitResults<PS, []>;
+                                   }): Promise<__compactRuntime.CircuitResults<PS, []>>;
 }
 
 export type ProvableCircuits<PS> = {
-  name(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  symbol(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  decimals(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, bigint>;
-  tokenColor(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  name(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  symbol(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  decimals(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
+  tokenColor(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, Uint8Array>>;
   depositUnshielded(context: __compactRuntime.CircuitContext<PS>,
                     secret_0: Uint8Array,
-                    amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+                    amount_0: bigint): Promise<__compactRuntime.CircuitResults<PS, []>>;
   depositShielded(context: __compactRuntime.CircuitContext<PS>,
                   secret_0: Uint8Array,
                   coin_0: { nonce: Uint8Array, color: Uint8Array, value: bigint
-                          }): __compactRuntime.CircuitResults<PS, []>;
+                          }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawUnshielded(context: __compactRuntime.CircuitContext<PS>,
                      secret_0: Uint8Array,
                      amount_0: bigint,
                      recipient_0: { is_left: boolean,
                                     left: { bytes: Uint8Array },
                                     right: { bytes: Uint8Array }
-                                  }): __compactRuntime.CircuitResults<PS, []>;
+                                  }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawShielded(context: __compactRuntime.CircuitContext<PS>,
                    secret_0: Uint8Array,
                    amount_0: bigint,
                    recipient_0: { bytes: Uint8Array },
-                   nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                               color: Uint8Array,
-                                                                               value: bigint
-                                                                             }>;
-  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+                   nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                       color: Uint8Array,
+                                                                                       value: bigint
+                                                                                     }>>;
+  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
   convertToShielded(context: __compactRuntime.CircuitContext<PS>,
                     amount_0: bigint,
                     recipient_0: { bytes: Uint8Array },
-                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                                color: Uint8Array,
-                                                                                value: bigint
-                                                                              }>;
+                    nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                        color: Uint8Array,
+                                                                                        value: bigint
+                                                                                      }>>;
   convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
                       coin_0: { nonce: Uint8Array,
                                 color: Uint8Array,
@@ -92,47 +92,47 @@ export type ProvableCircuits<PS> = {
                       recipient_0: { is_left: boolean,
                                      left: { bytes: Uint8Array },
                                      right: { bytes: Uint8Array }
-                                   }): __compactRuntime.CircuitResults<PS, []>;
+                                   }): Promise<__compactRuntime.CircuitResults<PS, []>>;
 }
 
 export type PureCircuits = {
 }
 
 export type Circuits<PS> = {
-  name(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  symbol(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, string>;
-  decimals(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, bigint>;
-  tokenColor(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, Uint8Array>;
+  name(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  symbol(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, string>>;
+  decimals(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
+  tokenColor(context: __compactRuntime.CircuitContext<PS>): Promise<__compactRuntime.CircuitResults<PS, Uint8Array>>;
   depositUnshielded(context: __compactRuntime.CircuitContext<PS>,
                     secret_0: Uint8Array,
-                    amount_0: bigint): __compactRuntime.CircuitResults<PS, []>;
+                    amount_0: bigint): Promise<__compactRuntime.CircuitResults<PS, []>>;
   depositShielded(context: __compactRuntime.CircuitContext<PS>,
                   secret_0: Uint8Array,
                   coin_0: { nonce: Uint8Array, color: Uint8Array, value: bigint
-                          }): __compactRuntime.CircuitResults<PS, []>;
+                          }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawUnshielded(context: __compactRuntime.CircuitContext<PS>,
                      secret_0: Uint8Array,
                      amount_0: bigint,
                      recipient_0: { is_left: boolean,
                                     left: { bytes: Uint8Array },
                                     right: { bytes: Uint8Array }
-                                  }): __compactRuntime.CircuitResults<PS, []>;
+                                  }): Promise<__compactRuntime.CircuitResults<PS, []>>;
   withdrawShielded(context: __compactRuntime.CircuitContext<PS>,
                    secret_0: Uint8Array,
                    amount_0: bigint,
                    recipient_0: { bytes: Uint8Array },
-                   nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                               color: Uint8Array,
-                                                                               value: bigint
-                                                                             }>;
-  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): __compactRuntime.CircuitResults<PS, bigint>;
+                   nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                       color: Uint8Array,
+                                                                                       value: bigint
+                                                                                     }>>;
+  getBalance(context: __compactRuntime.CircuitContext<PS>, secret_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, bigint>>;
   convertToShielded(context: __compactRuntime.CircuitContext<PS>,
                     amount_0: bigint,
                     recipient_0: { bytes: Uint8Array },
-                    nonce_0: Uint8Array): __compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
-                                                                                color: Uint8Array,
-                                                                                value: bigint
-                                                                              }>;
+                    nonce_0: Uint8Array): Promise<__compactRuntime.CircuitResults<PS, { nonce: Uint8Array,
+                                                                                        color: Uint8Array,
+                                                                                        value: bigint
+                                                                                      }>>;
   convertToUnshielded(context: __compactRuntime.CircuitContext<PS>,
                       coin_0: { nonce: Uint8Array,
                                 color: Uint8Array,
@@ -141,7 +141,7 @@ export type Circuits<PS> = {
                       recipient_0: { is_left: boolean,
                                      left: { bytes: Uint8Array },
                                      right: { bytes: Uint8Array }
-                                   }): __compactRuntime.CircuitResults<PS, []>;
+                                   }): Promise<__compactRuntime.CircuitResults<PS, []>>;
 }
 
 export type Ledger = {
@@ -170,8 +170,9 @@ export declare class Contract<PS = any, W extends Witnesses<PS> = Witnesses<PS>>
   initialState(context: __compactRuntime.ConstructorContext<PS>,
                name__0: string,
                symbol__0: string,
-               decimals__0: bigint): __compactRuntime.ConstructorResult<PS>;
+               decimals__0: bigint): Promise<__compactRuntime.ConstructorResult<PS>>;
 }
 
 export declare function ledger(state: __compactRuntime.StateValue | __compactRuntime.ChargedState): Ledger;
 export declare const pureCircuits: PureCircuits;
+export declare const expectedVk: Record<string, string>;

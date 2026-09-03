@@ -1,4 +1,4 @@
-import * as ledger from '@midnight-ntwrk/ledger-v8';
+import * as ledger from '@midnightntwrk/ledger-v9';
 
 export const DECIMALS = 6;
 const SCALE = 10n ** BigInt(DECIMALS);

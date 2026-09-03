@@ -6,7 +6,7 @@ import {
   ReplaceAuthority,
   signData,
   Transaction,
-} from '@midnight-ntwrk/ledger-v8';
+} from '@midnightntwrk/ledger-v9';
 import { submitTx } from '@midnight-ntwrk/midnight-js/contracts';
 import { getNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import { asContractAddress } from '@midnight-ntwrk/midnight-js/types';

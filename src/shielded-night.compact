@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
-// Pinned to the exact language version the deployed build was compiled with
-// (toolchain 0.31.1 = compactc 0.31.101, language 0.23.101). An exact pin is
-// what makes the byte-exact reproduction in README "Verifying the deployment"
-// meaningful: a different language version would refuse to compile rather than
-// silently emit different artifacts.
-pragma language_version 0.23;
+// Pinned to the exact language version the deployed build was compiled with.
+// On this branch (`ledger-v9`) that is toolchain 0.34.0 = compactc 0.34.0,
+// language 0.26.0, runtime 0.19.0, ledger 9. (`main` stays on toolchain 0.31.1
+// = language 0.23 for the 1.x/preview line.) An exact pin is what makes the
+// byte-exact reproduction in README "Verifying the deployment" meaningful: a
+// different language version would refuse to compile rather than silently emit
+// different artifacts.
+pragma language_version 0.26;
 
 import CompactStandardLibrary;
 
@@ -224,7 +226,8 @@ export circuit depositUnshielded(secret: Bytes<32>, amount: Uint<64>): [] {
  * returned.
  *
  * @dev The burn transient requires a wallet on toolchain 0.31.101+ / ledger-v8
- * 8.1.0; older wallets failed to mark the spent input UTXO as spent.
+ * 8.1.0 (or, on this `ledger-v9` branch, toolchain 0.34.0 / ledger-v9 1.0.0-rc.3);
+ * older wallets failed to mark the spent input UTXO as spent.
  *
  * Requirements:
  *

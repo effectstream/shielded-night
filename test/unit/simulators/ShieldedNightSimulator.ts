@@ -1,5 +1,6 @@
 import {
   type CircuitContext,
+  type CircuitId,
   type CircuitResults,
   createCircuitContext,
   createConstructorContext,
@@ -41,95 +42,129 @@ export const rightUserAddress = (bytes: Uint8Array): EitherContractOrUser => ({
  * OpenZeppelin compact-contracts simulator pattern: the compiled contract's
  * impure circuits run against a locally held CircuitContext, and each
  * successful call threads the updated context back so ledger state advances
- * across calls. Failed calls throw before the context is replaced, so state
+ * across calls. Failed calls reject before the context is replaced, so state
  * is untouched — matching on-chain semantics.
+ *
+ * @dev ASYNC ON THE LEDGER-V9 LINE. compact-runtime 0.19 makes every generated
+ * circuit — and `Contract.initialState` — return a Promise (it has to: a circuit
+ * may perform a cross-contract call, which fetches state). Construction therefore
+ * moves to the static `create()` factory and every circuit accessor is async.
+ * `getLedger()` stays synchronous: it only reads the context this simulator holds.
+ *
+ * @dev The runtime-0.19 `CircuitContext` also collapsed `currentQueryContext`,
+ * `currentPrivateState`, `currentZswapLocalState` and `gasCost` under a single
+ * `callContext`, and `createCircuitContext` gained the executing circuit's id as
+ * its first argument — so each call builds its context with its own id.
  */
 export class ShieldedNightSimulator {
   readonly contract: Contract<ShieldedNightPrivateState>;
   readonly contractAddress: string;
   private ctx: CircuitContext<ShieldedNightPrivateState>;
 
-  constructor(name: string, symbol: string, decimals: bigint) {
-    this.contract = new Contract<ShieldedNightPrivateState>({});
-    const init = this.contract.initialState(
+  private constructor(
+    contract: Contract<ShieldedNightPrivateState>,
+    contractAddress: string,
+    ctx: CircuitContext<ShieldedNightPrivateState>,
+  ) {
+    this.contract = contract;
+    this.contractAddress = contractAddress;
+    this.ctx = ctx;
+  }
+
+  static async create(
+    name: string,
+    symbol: string,
+    decimals: bigint,
+  ): Promise<ShieldedNightSimulator> {
+    const contract = new Contract<ShieldedNightPrivateState>({});
+    const init = await contract.initialState(
       createConstructorContext<ShieldedNightPrivateState>({}, COIN_PK),
       name,
       symbol,
       decimals,
     );
-    this.contractAddress = sampleContractAddress();
-    this.ctx = createCircuitContext(
-      this.contractAddress,
+    const contractAddress = sampleContractAddress();
+    const ctx = createCircuitContext<ShieldedNightPrivateState>(
+      'constructor',
+      contractAddress,
       COIN_PK,
       init.currentContractState,
       {},
     );
+    return new ShieldedNightSimulator(contract, contractAddress, ctx);
   }
 
   /** Read the public ledger state (balances map + sealed metadata). */
   getLedger(): Ledger {
-    return ledger(this.ctx.currentQueryContext.state);
+    return ledger(this.ctx.callContext.currentQueryContext.state);
   }
 
-  private advance<R>(res: CircuitResults<ShieldedNightPrivateState, R>): R {
-    // Each simulator call models its own transaction: keep the updated ledger
-    // state but discard the accumulated Zswap local state (coin receives/sends
-    // recorded by the previous call). Without this, successive deposits share
-    // one transaction-level receive accumulator and large amounts trip its
-    // Uint<64> overflow instead of exercising the contract's own logic.
-    this.ctx = createCircuitContext(
+  /**
+   * A fresh context for `circuitId` carrying the current ledger and private
+   * state. Each simulator call models its own transaction: keep the updated
+   * ledger state but discard the accumulated Zswap local state (coin
+   * receives/sends recorded by the previous call). Without this, successive
+   * deposits share one transaction-level receive accumulator and large amounts
+   * trip its Uint<64> overflow instead of exercising the contract's own logic.
+   */
+  private contextFor(circuitId: CircuitId): CircuitContext<ShieldedNightPrivateState> {
+    return createCircuitContext<ShieldedNightPrivateState>(
+      circuitId,
       this.contractAddress,
       COIN_PK,
-      res.context.currentQueryContext.state,
-      res.context.currentPrivateState,
+      this.ctx.callContext.currentQueryContext.state,
+      this.ctx.callContext.currentPrivateState ?? ({} as ShieldedNightPrivateState),
     );
+  }
+
+  private async run<R>(
+    circuitId: CircuitId,
+    call: (ctx: CircuitContext<ShieldedNightPrivateState>) => Promise<CircuitResults<ShieldedNightPrivateState, R>>,
+  ): Promise<R> {
+    const res = await call(this.contextFor(circuitId));
+    this.ctx = res.context;
     return res.result;
   }
 
-  name(): string {
-    return this.advance(this.contract.impureCircuits.name(this.ctx));
+  name(): Promise<string> {
+    return this.run('name', (c) => this.contract.impureCircuits.name(c));
   }
 
-  symbol(): string {
-    return this.advance(this.contract.impureCircuits.symbol(this.ctx));
+  symbol(): Promise<string> {
+    return this.run('symbol', (c) => this.contract.impureCircuits.symbol(c));
   }
 
-  decimals(): bigint {
-    return this.advance(this.contract.impureCircuits.decimals(this.ctx));
+  decimals(): Promise<bigint> {
+    return this.run('decimals', (c) => this.contract.impureCircuits.decimals(c));
   }
 
-  tokenColor(): Uint8Array {
-    return this.advance(this.contract.impureCircuits.tokenColor(this.ctx));
+  tokenColor(): Promise<Uint8Array> {
+    return this.run('tokenColor', (c) => this.contract.impureCircuits.tokenColor(c));
   }
 
-  getBalance(secret: Uint8Array): bigint {
-    return this.advance(this.contract.impureCircuits.getBalance(this.ctx, secret));
+  getBalance(secret: Uint8Array): Promise<bigint> {
+    return this.run('getBalance', (c) => this.contract.impureCircuits.getBalance(c, secret));
   }
 
-  depositUnshielded(secret: Uint8Array, amount: bigint): void {
-    this.advance(
-      this.contract.impureCircuits.depositUnshielded(this.ctx, secret, amount),
+  async depositUnshielded(secret: Uint8Array, amount: bigint): Promise<void> {
+    await this.run('depositUnshielded', (c) =>
+      this.contract.impureCircuits.depositUnshielded(c, secret, amount),
     );
   }
 
-  depositShielded(secret: Uint8Array, coin: ShieldedCoin): void {
-    this.advance(
-      this.contract.impureCircuits.depositShielded(this.ctx, secret, coin),
+  async depositShielded(secret: Uint8Array, coin: ShieldedCoin): Promise<void> {
+    await this.run('depositShielded', (c) =>
+      this.contract.impureCircuits.depositShielded(c, secret, coin),
     );
   }
 
-  withdrawUnshielded(
+  async withdrawUnshielded(
     secret: Uint8Array,
     amount: bigint,
     recipient: EitherContractOrUser,
-  ): void {
-    this.advance(
-      this.contract.impureCircuits.withdrawUnshielded(
-        this.ctx,
-        secret,
-        amount,
-        recipient,
-      ),
+  ): Promise<void> {
+    await this.run('withdrawUnshielded', (c) =>
+      this.contract.impureCircuits.withdrawUnshielded(c, secret, amount, recipient),
     );
   }
 
@@ -138,27 +173,27 @@ export class ShieldedNightSimulator {
     amount: bigint,
     recipient: { bytes: Uint8Array },
     nonce: Uint8Array,
-  ): ShieldedCoin {
-    return this.advance(
-      this.contract.impureCircuits.withdrawShielded(
-        this.ctx,
-        secret,
-        amount,
-        recipient,
-        nonce,
-      ),
+  ): Promise<ShieldedCoin> {
+    return this.run('withdrawShielded', (c) =>
+      this.contract.impureCircuits.withdrawShielded(c, secret, amount, recipient, nonce),
     );
   }
 
   /** Atomic NIGHT -> sNight (no secret): lock NIGHT and mint the wrapper. */
-  convertToShielded(amount: bigint, recipient: { bytes: Uint8Array }, nonce: Uint8Array): ShieldedCoin {
-    return this.advance(
-      this.contract.impureCircuits.convertToShielded(this.ctx, amount, recipient, nonce),
+  convertToShielded(
+    amount: bigint,
+    recipient: { bytes: Uint8Array },
+    nonce: Uint8Array,
+  ): Promise<ShieldedCoin> {
+    return this.run('convertToShielded', (c) =>
+      this.contract.impureCircuits.convertToShielded(c, amount, recipient, nonce),
     );
   }
 
   /** Atomic sNight -> NIGHT (no secret): burn the wrapper coin and release NIGHT. */
-  convertToUnshielded(coin: ShieldedCoin, recipient: EitherContractOrUser): void {
-    this.advance(this.contract.impureCircuits.convertToUnshielded(this.ctx, coin, recipient));
+  async convertToUnshielded(coin: ShieldedCoin, recipient: EitherContractOrUser): Promise<void> {
+    await this.run('convertToUnshielded', (c) =>
+      this.contract.impureCircuits.convertToUnshielded(c, coin, recipient),
+    );
   }
 }

@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `main` is the 1.x/preview line; `ledger-v9` is the long-lived Midnight 2.x port
+    # (see README "Two lines"). Both get full CI on every push.
+    branches: [main, ledger-v9]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  COMPACT_VERSION: '0.31.1'
+  # ledger-v9 line: toolchain 0.34.0 = compactc 0.34.0, language 0.26.0,
+  # compact-runtime 0.19.0, ledger 9. MUST equal the `pragma language_version`
+  # in src/shielded-night.compact and the `+version` in package.json's compact
+  # scripts, or the byte-exact rebuild job below is meaningless.
+  # (`main` pins 0.31.1 / language 0.23.)
+  COMPACT_VERSION: '0.34.0'
 
 jobs:
   unit:
@@ -85,8 +92,8 @@ jobs:
   reproducible-build:
     name: Byte-exact contract rebuild
     runs-on: ubuntu-latest
-    # Full ZK key generation for all 11 circuits measures ~15s; the headroom is
-    # for a cold compiler install.
+    # Full ZK key generation for all 11 circuits measures ~14s on 0.34.0; the
+    # headroom is for a cold compiler install.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +133,23 @@ jobs:
   integration:
     name: Integration tests (docker stack)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 150, not the 60 `main` uses. MEASURED, not guessed: the suite is 1.2-1.6x
+    # slower per file on the 2.x triple than on 1.x, and 60 was already thin on
+    # `main` (its last green run spent 50.3 min of its 60 inside vitest).
+    #
+    #   file                        main (1.x)   ledger-v9 (2.x)
+    #   security.test.ts (5)          1078.7 s        1373.4 s   1.27x
+    #   shielded-night.test.ts (8)     885.7 s        1101.2 s   1.24x
+    #   multiparty.test.ts (1)         471.8 s         753.9 s   1.60x
+    #   maintenance-authority (1)      153.8 s         153.8 s   1.00x  (fixed waits)
+    #   transient.test.ts (1)          249.8 s              --
+    #   combined.test.ts (1)           180.2 s              --
+    #
+    # The first run on this branch (33693462975) was PASSING every test and was
+    # killed by the 60-minute cap partway through transient.test.ts, having
+    # finished 15 of the 17 tests. Projected total here is ~66 min of test time,
+    # so 150 leaves room for the `retry: 2` tail without hiding a real hang.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 

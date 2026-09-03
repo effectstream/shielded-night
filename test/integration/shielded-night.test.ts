@@ -1,4 +1,4 @@
-import * as ledgerV8 from '@midnight-ntwrk/ledger-v8';
+import * as ledgerV9 from '@midnightntwrk/ledger-v9';
 import { describe, expect, test } from 'vitest';
 import * as contract from '../support/shielded-night.js';
 import { describeContract, describeContractWithWallets } from '../support/describe-contract.js';
@@ -17,7 +17,7 @@ import {
 const N = 10_000_000n; // 10 NIGHT at 6 decimals
 
 /** Hex key of native NIGHT in the wallet's unshielded balance map. */
-const NIGHT_HEX = ledgerV8.unshieldedToken().raw;
+const NIGHT_HEX = ledgerV9.unshieldedToken().raw;
 
 /** Flatten an error chain (Effect wrappers, causes) into searchable text. */
 const errText = (err: unknown): string => {

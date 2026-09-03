@@ -1,4 +1,4 @@
-import * as ledgerV8 from '@midnight-ntwrk/ledger-v8';
+import * as ledgerV9 from '@midnightntwrk/ledger-v9';
 import { describe, expect, test } from 'vitest';
 import * as contract from '../support/shielded-night.js';
 import { describeContract, describeContractWithWallets } from '../support/describe-contract.js';
@@ -13,7 +13,7 @@ import {
   waitForUnshieldedBalance,
 } from '../support/wallet-observations.js';
 
-const NIGHT_HEX = ledgerV8.unshieldedToken().raw;
+const NIGHT_HEX = ledgerV9.unshieldedToken().raw;
 
 /**
  * On-chain attack scenarios. These need a real ledger: the properties under

@@ -1,5 +1,5 @@
 import { submitCallTx } from '@midnight-ntwrk/midnight-js/contracts';
-import { MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
+import { MidnightBech32m } from '@midnightntwrk/wallet-sdk-address-format';
 import {
   CompiledShieldedNight,
   type ShieldedNightProviders,

@@ -10,15 +10,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-js": "2.5.1",
-    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.8",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
     "@midnight-ntwrk/dapp-connector-api": "4.0.1",
-    "@midnight-ntwrk/ledger-v8": "8.1.0",
-    "@midnight-ntwrk/midnight-js": "4.1.1",
-    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "4.1.1",
-    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1",
-    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnight-ntwrk/midnight-js": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "5.0.0-beta.7",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "5.0.0-beta.7",
     "bech32": "^2.0.0",
     "buffer": "^6.0.3",
     "effect": "^3.21.4",
@@ -27,7 +27,7 @@
     "process": "^0.11.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@midnight-ntwrk/wallet-sdk-address-format": "3.1.0"
+    "@midnightntwrk/wallet-sdk-address-format": "4.0.0-beta.2"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
@@ -43,9 +43,25 @@
     "vite-plugin-wasm": "^3.4.1"
   },
   "overrides": {
-    "@midnight-ntwrk/compact-js": "2.5.1",
-    "@midnight-ntwrk/compact-runtime": "0.16.0",
-    "@midnight-ntwrk/ledger-v8": "8.1.0",
-    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0"
-  }
+    "@midnight-ntwrk/compact-js": "2.5.5-rc.8",
+    "@midnight-ntwrk/compact-runtime": "0.19.0",
+    "@midnightntwrk/ledger-v9": "1.0.0-rc.3",
+    "@midnightntwrk/onchain-runtime-v4": "4.0.0-rc.3"
+  },
+  "//overrides": [
+    "The ledger-v9 line. Same single-wasm-copy rule as the root package.json:",
+    "@midnightntwrk/ledger-v9 (NOTE the scope has no hyphen) replaces",
+    "@midnight-ntwrk/ledger-v8, and compact-runtime is forced to 0.19.0 because",
+    "midnight-js 5.0.0-beta.7 pins the byte-identical 0.19.0-rc.0 while compactc",
+    "0.34.0 emits checkRuntimeVersion('0.19.0'). onchain-runtime-v4 is pinned one",
+    "level down for the same reason. These MUST agree with resolve.dedupe in",
+    "vite.config.ts, which collapses the copies the ROOT node_modules would",
+    "otherwise contribute through ../src/managed.",
+    "`main` separately pins compact-js 2.5.1, compact-runtime 0.16.0, ledger-v8",
+    "8.1.0 and onchain-runtime-v3 3.0.0 for the v8/preview line (merged in from",
+    "main @ f7fcefa on 2026-09-03, project 00007 phase F2). None of those apply",
+    "here: this tree uses ledger-v9/onchain-runtime-v4 exclusively and compact-js",
+    "is already exact at 2.5.5-rc.8. Do not copy the v8-line overrides onto",
+    "this branch."
+  ]
 }
