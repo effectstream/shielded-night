@@ -29,7 +29,6 @@
     },
   },
   "overrides": {
-    "//": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving.",
     "@midnight-ntwrk/ledger-v8": "8.1.0",
   },
   "packages": {

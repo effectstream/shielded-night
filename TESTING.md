@@ -57,8 +57,58 @@ bun run smoke
 | Var | Default | Meaning |
 | --- | --- | --- |
 | `MN_ENV` | `undeployed` | `undeployed` boots the local stack; `preprod`/`preview`/`qanet` run against hosted networks (requires `MN_SEED`, boots only a local proof server) |
-| `MN_SEED` | genesis seed on `undeployed` | wallet seed for hosted envs |
+| `MN_SEED` | genesis seed on `undeployed` | wallet seed for hosted envs; stays optional on `undeployed`, including in external-stack mode |
 | `MN_TEST_RETRY` | `2` | vitest retry count |
+| `MN_EXTERNAL_STACK` | unset | `1` = run against an already-running stack instead of booting one (see below) |
+| `MN_INDEXER_URL` | `http://127.0.0.1:8088/api/v4/graphql` | indexer endpoint (`undeployed` only) |
+| `MN_INDEXER_WS_URL` | `ws://127.0.0.1:8088/api/v4/graphql/ws` | indexer subscription endpoint (`undeployed` only) |
+| `MN_NODE_URL` | `http://127.0.0.1:9944` | node RPC endpoint (`undeployed` only) |
+| `MN_PROOF_SERVER_URL` | `http://127.0.0.1:6300` | proof server endpoint — the one override that also applies to the hosted envs, whose proof server is your own |
+
+The four URL vars are resolved by `networkFor()` in
+[test/support/network.ts](test/support/network.ts), so they steer the deploy /
+lock / verify scripts too:
+
+```bash
+MN_ENV=undeployed MN_NODE_URL=http://127.0.0.1:31944 \
+  MN_INDEXER_URL=http://127.0.0.1:31088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://127.0.0.1:31088/api/v4/graphql/ws \
+  MN_PROOF_SERVER_URL=http://127.0.0.1:31300 \
+  bun run scripts/deploy.ts
+```
+
+On the hosted envs only `MN_PROOF_SERVER_URL` is honoured: the indexer and node
+URLs identify the network itself, and silently repointing `preview` at a local
+indexer because a variable was left exported would be an expensive, invisible
+bug.
+
+### Running against a stack you already have (`MN_EXTERNAL_STACK=1`)
+
+The default is unchanged and is what CI runs: the suite owns its stack, so a
+green run proves the contract against a known-clean devnet. External mode is for
+the other direction — running the SAME suite against a stack somebody else
+brought up (a compose deployment of this dApp, a devnet on non-default ports, a
+container with no docker socket of its own). testcontainers is skipped, the URLs
+above are used as-is, and **the stack is never torn down** (we do not stop what
+we did not start):
+
+```bash
+MN_EXTERNAL_STACK=1 MN_ENV=undeployed \
+  MN_INDEXER_URL=http://indexer:8088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://indexer:8088/api/v4/graphql/ws \
+  MN_NODE_URL=http://node:9944 \
+  MN_PROOF_SERVER_URL=http://proof-server:6300 \
+  bun run test:integration       # or: bun run smoke
+```
+
+Global setup preflights the three HTTP endpoints and fails immediately, naming
+the URL that is wrong, rather than letting a misconfiguration surface ten
+minutes later as a wallet-sync timeout. `MN_SEED` stays optional on
+`undeployed` (the genesis seed is the default) — set it when that seed belongs
+to another facade on the target stack.
+
+The suite deploys contracts and spends from the genesis-funded seeds, so point
+it only at a throwaway devnet.
 
 ### Provider wiring note
 

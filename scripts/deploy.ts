@@ -13,10 +13,19 @@
  *   # optional metadata overrides (default: "Shielded Night" / "sNight" / 6)
  *   CV_NAME="Shielded Night" CV_SYMBOL=sNight CV_DECIMALS=6 MN_ENV=preview MN_MNEMONIC="…" bun run scripts/deploy.ts
  *
+ *   # optional: also write the deploy record as JSON, for an automated deployment
+ *   DEPLOY_OUT=/srv/shielded-night/contract.json MN_ENV=undeployed bun run scripts/deploy.ts
+ *
  * Env:
  *   MN_ENV       preview | preprod | undeployed | qanet   (default: preview)
  *   MN_MNEMONIC  BIP-39 phrase; derived to a seed exactly as Lace does
  *   MN_SEED      raw hex seed (alternative to MN_MNEMONIC)
+ *   MN_INDEXER_URL / MN_INDEXER_WS_URL / MN_NODE_URL / MN_PROOF_SERVER_URL
+ *                endpoint overrides (see test/support/network.ts) — required
+ *                when deploying from INSIDE a docker network, where the
+ *                `undeployed` 127.0.0.1 defaults are unreachable
+ *   DEPLOY_OUT   path to write the deploy record to, atomically (see
+ *                scripts/deploy-record.ts); unset = nothing is written
  *
  * MN_MNEMONIC / MN_SEED can live in the repo-root .env (gitignored; see
  * .env.example) instead of the shell - the shell still takes precedence.
@@ -28,6 +37,7 @@ import { isEnvName, networkFor, type EnvName, GENESIS_MINT_SEED } from '../test/
 import { awaitWalletReady, buildWallet, DEFAULT_RESTORED_SYNC_TIMEOUT_MS } from '../test/support/wallet-builder.js';
 import { setupContract } from '../test/support/setup-contract.js';
 import { DEPLOY_ARGS, factory } from '../test/support/shielded-night.js';
+import { writeDeployRecord } from './deploy-record.js';
 
 /**
  * Resolve the wallet seed from MN_MNEMONIC (BIP-39, derived as Lace does) or a
@@ -83,6 +93,17 @@ async function main() {
     console.log(`   address: ${address}`);
     console.log(`\nPaste into frontend/.env:`);
     console.log(`   ${env.toUpperCase()}_ADDRESS=${address}`);
+
+    // The contract exists on chain from here on: the address above is the
+    // record of record even if writing the JSON below fails.
+    const recordPath = writeDeployRecord({
+      address,
+      networkId: network.networkId,
+      name,
+      symbol,
+      decimals,
+    });
+    if (recordPath) console.log(`\n[deploy] deploy record written: ${recordPath}`);
   } finally {
     await walletCtx.wallet.stop().catch(() => undefined);
   }

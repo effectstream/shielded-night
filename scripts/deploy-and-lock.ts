@@ -15,6 +15,10 @@
  *   MN_ENV       preview | preprod | undeployed | qanet   (default: preview)
  *   MN_MNEMONIC  BIP-39 phrase; derived to a seed exactly as Lace does
  *   MN_SEED      raw hex seed (alternative to MN_MNEMONIC)
+ *   MN_INDEXER_URL / MN_INDEXER_WS_URL / MN_NODE_URL / MN_PROOF_SERVER_URL
+ *                endpoint overrides (see test/support/network.ts)
+ *   DEPLOY_OUT   path to write the deploy record to, atomically, with
+ *                "locked": true (see scripts/deploy-record.ts)
  *
  * MN_MNEMONIC / MN_SEED can live in the repo-root .env (gitignored; see
  * .env.example) instead of the shell - the shell still takes precedence.
@@ -27,6 +31,7 @@ import { awaitWalletReady, buildWallet, DEFAULT_RESTORED_SYNC_TIMEOUT_MS } from 
 import { setupContract } from '../test/support/setup-contract.js';
 import { DEPLOY_ARGS, factory } from '../test/support/shielded-night.js';
 import { lockContract, readAuthority } from '../test/support/governance.js';
+import { writeDeployRecord } from './deploy-record.js';
 
 /**
  * Resolve the wallet seed from MN_MNEMONIC (BIP-39, derived as Lace does) or a
@@ -95,6 +100,16 @@ async function main() {
     console.log(`   authority: committee=${after.committeeSize} threshold=${after.threshold} counter=${after.counter}`);
     console.log(`\nPaste into frontend/.env:`);
     console.log(`   ${env.toUpperCase()}_ADDRESS=${address}`);
+
+    const recordPath = writeDeployRecord({
+      address,
+      networkId: network.networkId,
+      name,
+      symbol,
+      decimals,
+      locked: true,
+    });
+    if (recordPath) console.log(`\n[deploy+lock] deploy record written: ${recordPath}`);
   } finally {
     await walletCtx.wallet.stop().catch(() => undefined);
   }
