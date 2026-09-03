@@ -25,6 +25,24 @@
  * only the CODE check decides the exit code. It never weakens CODE: a key
  * mismatch or a missing/extra circuit still exits 1. See scripts/verify-args.ts.
  */
+// Bun-under-ESM interop hazard, not a style choice: graphql@17's package.json
+// exports map lists Bun's own "bun" condition before "require" in every
+// branch, both pointing at an ESM-only .mjs. When
+// @midnight-ntwrk/midnight-js-indexer-public-data-provider (an ESM module)
+// is the FIRST thing to resolve "graphql" -- via its own `import ... from
+// '@apollo/client/core'`, which internally does a plain CJS
+// `require('graphql')` inside graphql-tag's UMD bundle -- Bun refuses to
+// require() the async ES module and this script crashes at import time,
+// before a single line of its own code runs. Statically importing "graphql"
+// first, here, resolves it through Bun's ESM path (which handles an async
+// module fine) and caches that resolution, so the later CJS require() inside
+// graphql-tag reuses the cached module instead of re-resolving via the
+// broken exports-map ordering. Measured: this exact crash reproduces via a
+// bare `import { indexerPublicDataProvider } from
+// '@midnight-ntwrk/midnight-js-indexer-public-data-provider'` with no other
+// code, deterministically, 100% of runs; prepending `import 'graphql'`
+// resolves it, also deterministically. Project 00007, question Q15/Q16.
+import 'graphql';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
 import { createHash } from 'node:crypto';
