@@ -15,8 +15,15 @@
  *
  * Usage:
  *   MN_ENV=preview CV_ADDRESS=<hex-address> bun run scripts/verify-deployment.ts
+ *   MN_ENV=undeployed CV_ADDRESS=<hex-address> bun run verify:deployment -- --allow-unlocked
  *
  * Exit code 0 only if BOTH checks pass.
+ *
+ * `--allow-unlocked` is for a contract that is deliberately NOT locked - every
+ * demo/devnet deploy, which sets `SHIELDED_NIGHT_LOCK=false` because locking is
+ * a one-way door. With it, the lock state is still measured and printed, but
+ * only the CODE check decides the exit code. It never weakens CODE: a key
+ * mismatch or a missing/extra circuit still exits 1. See scripts/verify-args.ts.
  */
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
@@ -24,6 +31,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { isEnvName, networkFor, type EnvName } from '../test/support/network.js';
+import { lockVerdictLine, parseVerifyArgs, verifyOutcome } from './verify-args.js';
 
 const KEYS_DIR = path.resolve(new URL(import.meta.url).pathname, '..', '..', 'src', 'managed', 'keys');
 
@@ -33,6 +41,7 @@ const bytesEqual = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
 async function main() {
+  const { allowUnlocked } = parseVerifyArgs(process.argv.slice(2));
   const rawEnv = process.env.MN_ENV ?? 'preview';
   if (!isEnvName(rawEnv)) throw new Error(`Invalid MN_ENV "${rawEnv}"`);
   const env: EnvName = rawEnv;
@@ -42,7 +51,11 @@ async function main() {
   const network = networkFor(env);
   setNetworkId(network.networkId);
   console.log(`[verify] env=${env} indexer=${network.indexer}`);
-  console.log(`[verify] contract ${address}\n`);
+  console.log(`[verify] contract ${address}`);
+  if (allowUnlocked) {
+    console.log('[verify] --allow-unlocked: lock state is REPORTED, only the verifier-key check decides the exit code');
+  }
+  console.log('');
 
   const publicData = indexerPublicDataProvider(network.indexer, network.indexerWS);
   const state = await publicData.queryContractState(address);
@@ -92,18 +105,11 @@ async function main() {
   const threshold = cma.threshold;
   const locked = committee === 0 && threshold >= 1;
   console.log(`\nmaintenance authority: committee=${committee} threshold=${threshold} counter=${cma.counter}`);
-  console.log(
-    locked
-      ? '✓ LOCKED: empty committee with positive threshold - no maintenance update can ever be authorized.'
-      : `✗ NOT locked: ${committee} committee member(s) can still change the contract (threshold ${threshold}).`,
-  );
+  console.log(lockVerdictLine({ locked, committee, threshold, allowUnlocked }));
 
-  console.log(
-    codeOk && locked
-      ? '\n✅ verified: deployed code matches this repo byte-for-byte AND the contract is immutable.'
-      : '\n❌ verification FAILED (see above).',
-  );
-  process.exit(codeOk && locked ? 0 : 1);
+  const outcome = verifyOutcome({ codeOk, locked, allowUnlocked });
+  console.log(outcome.summary);
+  process.exit(outcome.exitCode);
 }
 
 main().catch((e) => {

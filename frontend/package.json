@@ -56,6 +56,12 @@
     "0.34.0 emits checkRuntimeVersion('0.19.0'). onchain-runtime-v4 is pinned one",
     "level down for the same reason. These MUST agree with resolve.dedupe in",
     "vite.config.ts, which collapses the copies the ROOT node_modules would",
-    "otherwise contribute through ../src/managed."
+    "otherwise contribute through ../src/managed.",
+    "`main` separately pins compact-js 2.5.1, compact-runtime 0.16.0, ledger-v8",
+    "8.1.0 and onchain-runtime-v3 3.0.0 for the v8/preview line (merged in from",
+    "main @ f7fcefa on 2026-09-03, project 00007 phase F2). None of those apply",
+    "here: this tree uses ledger-v9/onchain-runtime-v4 exclusively and compact-js",
+    "is already exact at 2.5.5-rc.8. Do not copy the v8-line overrides onto",
+    "this branch."
   ]
 }

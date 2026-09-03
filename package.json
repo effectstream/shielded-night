@@ -53,7 +53,16 @@
     "them onto 0.19.0 is safe and avoids a second onchain-runtime wasm copy.",
     "onchain-runtime-v4 is pinned for the same reason one level down: today",
     "compact-runtime's `^4.0.0-rc.3` and midnight-js-protocol's exact",
-    "`4.0.0-rc.3` agree, but a released 4.0.0 would split them."
+    "`4.0.0-rc.3` agree, but a released 4.0.0 would split them.",
+    "`main` separately pins @midnight-ntwrk/compact-js at 2.5.1, @midnight-ntwrk/",
+    "ledger-v8 at 8.1.0 and @midnight-ntwrk/onchain-runtime-v3 at 3.0.0 for the",
+    "v8/preview line (merged in from main @ f7fcefa on 2026-09-03, project 00007",
+    "phase F2). None of those three apply to this v9 dependency graph: ledger-v8",
+    "and onchain-runtime-v3 are not in this tree at all (this line uses ledger-v9",
+    "and onchain-runtime-v4, both pinned above), and compact-js is already an",
+    "EXACT direct dependency here (2.5.5-rc.8, not a caret range), so it needs no",
+    "defensive override -- unlike main's `^2.5.1`, it cannot drift to an",
+    "unresolvable version. Do not copy the v8-line overrides onto this branch."
   ],
   "overrides": {
     "@midnightntwrk/ledger-v9": "1.0.0-rc.3",

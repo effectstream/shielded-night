@@ -22,6 +22,11 @@ bun run compact:fast   # compile contract JS only (--skip-zk, no prover keys)
 bun run test:unit
 ```
 
+Besides the contract simulator suites, this tier also covers the chain-free
+script policies: the runtime address override, the network env-var overrides,
+the deploy record, and the verifier's `--allow-unlocked` exit-code policy
+([test/unit/verify-args.unit.test.ts](test/unit/verify-args.unit.test.ts)).
+
 The simulator ([test/unit/simulators/ShieldedNightSimulator.ts](test/unit/simulators/ShieldedNightSimulator.ts))
 executes the compiled circuits directly: state assertions are exact and failed
 calls throw the contract's `assert` messages. Token movements are recorded as
@@ -82,6 +87,40 @@ On the hosted envs only `MN_PROOF_SERVER_URL` is honoured: the indexer and node
 URLs identify the network itself, and silently repointing `preview` at a local
 indexer because a variable was left exported would be an expensive, invisible
 bug.
+
+### Verifying a deployment as a gate: `--allow-unlocked`
+
+`scripts/verify-deployment.ts` is the strongest check a stack can run — it
+proves the ZK artifacts the page serves are the rules the chain enforces — and
+it is meant to be read as an **exit code** from a compose one-shot, not parsed
+from stdout.
+
+By default it asserts two things and exits 0 only if both hold: the verifier
+keys match, **and** the contract is locked. A devnet contract is deliberately
+never locked (`SHIELDED_NIGHT_LOCK=false`), so the default run exits 1 on a
+perfectly healthy stack. Pass `--allow-unlocked` there:
+
+```bash
+# strict (hosted release): unlocked => exit 1
+MN_ENV=preprod CV_ADDRESS=<addr> bun run verify:deployment
+
+# devnet gate: lock state reported, exit code = the verifier-key check only
+MN_ENV=undeployed CV_ADDRESS=<addr> bun run verify:deployment -- --allow-unlocked
+```
+
+| | keys match | key mismatch / missing / extra circuit |
+| --- | --- | --- |
+| **locked**, no flag | exit 0 | exit 1 |
+| **unlocked**, no flag | exit 1 | exit 1 |
+| **locked**, `--allow-unlocked` | exit 0 | exit 1 |
+| **unlocked**, `--allow-unlocked` | exit 0 | **exit 1** |
+
+The flag only ever changes what an *unlocked* contract does to the exit code;
+it never relaxes the key check. The policy itself is unit-tested in
+[test/unit/verify-args.unit.test.ts](test/unit/verify-args.unit.test.ts)
+against [scripts/verify-args.ts](scripts/verify-args.ts), so no chain is needed
+to prove the table above. Unknown arguments are rejected, so a typo fails
+loudly instead of silently reverting to strict.
 
 ### Running against a stack you already have (`MN_EXTERNAL_STACK=1`)
 
