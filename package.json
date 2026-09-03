@@ -40,8 +40,10 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   },
-  "//overrides": "Force a single ledger-v8 copy tree-wide: two copies give two LedgerParameters class identities and break `instanceof` checks during proving. The note lives OUT here because bun >= 1.4.0 no longer counts a `//` key inside `overrides` as an override, so a lockfile saved with one is rejected by `--frozen-lockfile`.",
+  "//overrides": "Every entry forces ONE copy of a WASM-bearing package tree-wide: two copies give two class identities and break `instanceof` checks during proving. ledger-v8 -> two LedgerParameters. onchain-runtime-v3 -> 'expected instance of ChargedState' when reading ledger state; it needs pinning because compact-runtime 0.16.0 asks for ^3.0.0 (which now resolves to 3.1.0) while midnight-js-protocol 4.1.1 pins 3.0.0 exactly, so an unpinned resolve installs both. compact-js is pinned because the direct dependency range ^2.5.1 now resolves to 2.5.3, which depends on an unpublished @midnight-ntwrk/ledger-v9 alpha and cannot be installed at all -- and would also be a second compact-js next to the 2.5.1 midnight-js-protocol pins. frontend/package.json mirrors the compact-js/compact-runtime/ledger-v8/onchain-runtime-v3 pins for its own tree. The note lives OUT here because bun >= 1.4.0 no longer counts a `//` key inside `overrides` as an override, so a lockfile saved with one is rejected by `--frozen-lockfile`.",
   "overrides": {
-    "@midnight-ntwrk/ledger-v8": "8.1.0"
+    "@midnight-ntwrk/compact-js": "2.5.1",
+    "@midnight-ntwrk/ledger-v8": "8.1.0",
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0"
   }
 }
