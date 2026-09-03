@@ -186,6 +186,43 @@ maintenance authority: committee=0 threshold=1 counter=1
 
 The script exits non-zero if either check fails (e.g. it correctly flags contracts deployed from older builds).
 
+### Verifying a contract that is deliberately not locked: `--allow-unlocked`
+
+Locking is a one-way door, so it is only right for a hosted release. Every
+devnet/demo deploy leaves the contract **unlocked** on purpose
+(`SHIELDED_NIGHT_LOCK=false`) - and the strict run above then exits 1 even when
+all 11 verifier keys match, because the LOCK check failed. That makes the
+strongest check in the profile unreadable from the exit code.
+
+`--allow-unlocked` measures and prints the lock state exactly as before, but
+lets **only the code check decide the exit code**:
+
+```bash
+MN_ENV=undeployed CV_ADDRESS=<deployed-address> bun run verify:deployment -- --allow-unlocked
+```
+
+(The `--` is what makes `bun run` forward the flag to the script; calling
+`bun run scripts/verify-deployment.ts --allow-unlocked` directly works too.)
+
+Output on an unlocked contract whose code matches:
+
+```
+maintenance authority: committee=1 threshold=1 counter=0
+ℹ NOT locked: 1 committee member(s) can still change the contract (threshold 1). Reported only, not failed: --allow-unlocked was passed.
+
+✅ verified: deployed code matches this repo byte-for-byte. Lock state REPORTED ONLY (--allow-unlocked): this contract is NOT immutable.
+```
+
+The flag **never weakens the code check**: a verifier-key mismatch, a missing
+circuit or an extra circuit still exits 1 with the flag set. It only ever
+changes what an *unlocked* contract does to the exit code. Use it for a demo
+stack's verify step; never for a hosted release, where being immutable is part
+of the claim.
+
+Unknown arguments are rejected rather than ignored, so a typo
+(`--allow-unlock`) fails loudly instead of silently reverting to the strict
+behaviour.
+
 ## How to run tests
 
 Two tiers (details and env vars in [TESTING.md](TESTING.md)):
