@@ -23,6 +23,7 @@ import {
   type SignatureVerifyingKey,
   type SigningKey,
 } from '@midnightntwrk/onchain-runtime-v4';
+import { unshieldedToken } from '@midnightntwrk/ledger-v9';
 import pino from 'pino';
 import { ledger } from '../managed/contract/index.js';
 
@@ -39,6 +40,57 @@ export const COMPATIBILITY = {
 
 export const REPOSITORY_ROOT = path.resolve(new URL(import.meta.url).pathname, '..', '..', '..', '..');
 export const MANAGED_DIRECTORY = path.resolve(REPOSITORY_ROOT, 'contracts', 'v2', 'managed');
+export const DEFAULT_WALLET_SYNC_TIMEOUT_MS = 300_000;
+const MIN_WALLET_SYNC_TIMEOUT_MS = 30_000;
+const MAX_WALLET_SYNC_TIMEOUT_MS = 900_000;
+
+export interface DeploymentWalletFundingState {
+  readonly unshielded: { readonly balances: Readonly<Record<string, bigint>> };
+  readonly dust: { balance(at: Date): bigint };
+}
+
+export function deploymentWalletSyncTimeoutMs(): number {
+  const configured = process.env.MN_WALLET_SYNC_TIMEOUT_MS?.trim();
+  if (!configured) return DEFAULT_WALLET_SYNC_TIMEOUT_MS;
+  if (!/^\d+$/.test(configured)) {
+    throw new Error('MN_WALLET_SYNC_TIMEOUT_MS must be an integer number of milliseconds.');
+  }
+  const timeout = Number(configured);
+  if (!Number.isSafeInteger(timeout) || timeout < MIN_WALLET_SYNC_TIMEOUT_MS || timeout > MAX_WALLET_SYNC_TIMEOUT_MS) {
+    throw new Error(
+      `MN_WALLET_SYNC_TIMEOUT_MS must be between ${MIN_WALLET_SYNC_TIMEOUT_MS} and ${MAX_WALLET_SYNC_TIMEOUT_MS} milliseconds.`,
+    );
+  }
+  return timeout;
+}
+
+export function assertDeploymentWalletFunded(state: DeploymentWalletFundingState): void {
+  const night = state.unshielded.balances[unshieldedToken().raw] ?? 0n;
+  if (night <= 0n) throw new Error('Deployment wallet has no available NIGHT after synchronization.');
+  if (state.dust.balance(new Date()) <= 0n) {
+    throw new Error('Deployment wallet has no available DUST after synchronization.');
+  }
+}
+
+export async function withSyncedDeploymentWallet<TWallet, TResult>(
+  provider: {
+    readonly wallet: TWallet;
+    start(waitForFundsInWallet?: boolean): Promise<void>;
+    stop(): Promise<void>;
+  },
+  sync: (wallet: TWallet, throttleTime?: number, timeout?: number) => Promise<DeploymentWalletFundingState>,
+  action: () => Promise<TResult>,
+): Promise<TResult> {
+  const timeout = deploymentWalletSyncTimeoutMs();
+  try {
+    await provider.start(false);
+    const state = await sync(provider.wallet, 2_000, timeout);
+    assertDeploymentWalletFunded(state);
+    return await action();
+  } finally {
+    await provider.stop().catch(() => undefined);
+  }
+}
 
 interface MaintenanceKeyRecord {
   readonly schemaVersion: 1;

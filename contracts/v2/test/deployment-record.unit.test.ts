@@ -5,9 +5,11 @@ import path from 'node:path';
 import { Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { unshieldedToken } from '@midnightntwrk/ledger-v9';
 import {
   assertMaintenanceAuthorityKey,
   createWalletLogger,
+  deploymentWalletSyncTimeoutMs,
   mergeVerificationRecord,
   preflightRecordOutput,
   prepareMaintenanceSigningKey,
@@ -15,6 +17,7 @@ import {
   sourceCommit,
   type Verification,
   withDurableMaintenanceKey,
+  withSyncedDeploymentWallet,
 } from '../scripts/profile.js';
 
 const ADDRESS = 'a'.repeat(64);
@@ -34,6 +37,7 @@ const verification: Verification = {
 const originalDeployOut = process.env.DEPLOY_OUT;
 const originalSourceCommit = process.env.SHIELDED_NIGHT_COMMIT;
 const originalMaintenanceKeyFile = process.env.MN_MAINTENANCE_KEY_FILE;
+const originalWalletSyncTimeout = process.env.MN_WALLET_SYNC_TIMEOUT_MS;
 
 afterEach(() => {
   if (originalDeployOut === undefined) delete process.env.DEPLOY_OUT;
@@ -42,6 +46,8 @@ afterEach(() => {
   else process.env.SHIELDED_NIGHT_COMMIT = originalSourceCommit;
   if (originalMaintenanceKeyFile === undefined) delete process.env.MN_MAINTENANCE_KEY_FILE;
   else process.env.MN_MAINTENANCE_KEY_FILE = originalMaintenanceKeyFile;
+  if (originalWalletSyncTimeout === undefined) delete process.env.MN_WALLET_SYNC_TIMEOUT_MS;
+  else process.env.MN_WALLET_SYNC_TIMEOUT_MS = originalWalletSyncTimeout;
 });
 
 describe('deployment safety', () => {
@@ -118,6 +124,78 @@ describe('deployment safety', () => {
       artifactSha256: '2'.repeat(64),
     }, walletAndSubmission)).rejects.toThrow('Set MN_MAINTENANCE_KEY_FILE');
     expect(walletAndSubmission).not.toHaveBeenCalled();
+  });
+
+  test('uses a bounded wallet sync, requires NIGHT and DUST, and always stops', async () => {
+    const wallet = { fixture: 'wallet' };
+    const provider = {
+      wallet,
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    const fundedState = (night: bigint, dust: bigint) => ({
+      unshielded: { balances: { [unshieldedToken().raw]: night } },
+      dust: { balance: () => dust },
+    });
+    const action = vi.fn(async () => 'deployed');
+    const sync = vi.fn(async () => fundedState(1n, 1n));
+
+    delete process.env.MN_WALLET_SYNC_TIMEOUT_MS;
+    await expect(withSyncedDeploymentWallet(provider, sync, action)).resolves.toBe('deployed');
+    expect(provider.start).toHaveBeenCalledWith(false);
+    expect(sync).toHaveBeenCalledWith(wallet, 2_000, 300_000);
+    expect(action).toHaveBeenCalledOnce();
+    expect(provider.stop).toHaveBeenCalledOnce();
+
+    process.env.MN_WALLET_SYNC_TIMEOUT_MS = '180000';
+    expect(deploymentWalletSyncTimeoutMs()).toBe(180_000);
+    process.env.MN_WALLET_SYNC_TIMEOUT_MS = '29999';
+    expect(() => deploymentWalletSyncTimeoutMs()).toThrow('between 30000 and 900000');
+    process.env.MN_WALLET_SYNC_TIMEOUT_MS = 'not-a-timeout';
+    expect(() => deploymentWalletSyncTimeoutMs()).toThrow('integer number of milliseconds');
+
+    process.env.MN_WALLET_SYNC_TIMEOUT_MS = '180000';
+    const noNightAction = vi.fn(async () => undefined);
+    const noNightProvider = {
+      wallet,
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    await expect(withSyncedDeploymentWallet(
+      noNightProvider,
+      async () => fundedState(0n, 1n),
+      noNightAction,
+    )).rejects.toThrow('no available NIGHT');
+    expect(noNightAction).not.toHaveBeenCalled();
+    expect(noNightProvider.stop).toHaveBeenCalledOnce();
+
+    const noDustAction = vi.fn(async () => undefined);
+    const noDustProvider = {
+      wallet,
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    await expect(withSyncedDeploymentWallet(
+      noDustProvider,
+      async () => fundedState(1n, 0n),
+      noDustAction,
+    )).rejects.toThrow('no available DUST');
+    expect(noDustAction).not.toHaveBeenCalled();
+    expect(noDustProvider.stop).toHaveBeenCalledOnce();
+
+    const timedOutAction = vi.fn(async () => undefined);
+    const timedOutProvider = {
+      wallet,
+      start: vi.fn(async () => undefined),
+      stop: vi.fn(async () => undefined),
+    };
+    await expect(withSyncedDeploymentWallet(
+      timedOutProvider,
+      async () => { throw new Error('synthetic sync timeout'); },
+      timedOutAction,
+    )).rejects.toThrow('synthetic sync timeout');
+    expect(timedOutAction).not.toHaveBeenCalled();
+    expect(timedOutProvider.stop).toHaveBeenCalledOnce();
   });
 
   test('persists mode-0600 signing-key custody before use and restores it in a fresh process', () => {

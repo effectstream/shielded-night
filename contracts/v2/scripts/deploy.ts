@@ -3,7 +3,7 @@ import '../../../scripts/load-env.js';
 import { CompiledContract } from '@midnight-ntwrk/compact-js';
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-import { MidnightWalletProvider, initializeMidnightProviders } from '@midnight-ntwrk/testkit-js';
+import { MidnightWalletProvider, initializeMidnightProviders, syncWallet } from '@midnight-ntwrk/testkit-js';
 import { NetworkId, validateMnemonic } from '@midnightntwrk/wallet-sdk';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import { Contract } from '../managed/contract/index.js';
@@ -20,6 +20,7 @@ import {
   stagenet,
   verifyAddress,
   withDurableMaintenanceKey,
+  withSyncedDeploymentWallet,
   writeRecord,
 } from './profile.js';
 import { loadWalletEnvFile } from './load-wallet-env.js';
@@ -59,8 +60,7 @@ async function main() {
     // testkit-js logs the seed at info level; deployment logging must remain
     // silent because structured redaction cannot remove an interpolated secret.
     const wallet = await MidnightWalletProvider.build(createWalletLogger(), environment, deploymentSeed());
-    await wallet.start(true);
-    try {
+    await withSyncedDeploymentWallet(wallet, syncWallet, async () => {
       const providers = initializeMidnightProviders(wallet, environment, {
         privateStateStoreName: 'shielded-night-v2-stagenet',
         zkConfigPath: MANAGED_DIRECTORY,
@@ -126,9 +126,7 @@ async function main() {
       console.log(`[deploy] verified stagenet contract ${verified.address}`);
       console.log(`[deploy] maintenance authority locked=${verified.authority.locked}`);
       console.log(`[deploy] record ${recordPath}`);
-    } finally {
-      await wallet.stop().catch(() => undefined);
-    }
+    });
   });
 }
 

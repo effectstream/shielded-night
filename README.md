@@ -124,6 +124,8 @@ docker run --rm \
   your-deployment-image bun run deploy:v2
 ```
 
+Wallet synchronization uses a five-minute timeout by default and then requires positive NIGHT and DUST balances before provider initialization or transaction construction. Set `MN_WALLET_SYNC_TIMEOUT_MS` to an integer from `30000` through `900000` when a slower indexer needs a different bounded wait.
+
 The deployer closes and read-back validates the key file before wallet startup, passes that exact key to Midnight.js, and verifies that its derived public key is the 1-of-1 on-chain maintenance authority. It then confirms the transaction, compares the circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
 
 ```bash
