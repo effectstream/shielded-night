@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import pino from 'pino';
 import { ledger } from '../managed/contract/index.js';
 
 export const COMPATIBILITY = {
@@ -17,6 +18,15 @@ export const COMPATIBILITY = {
 
 export const REPOSITORY_ROOT = path.resolve(new URL(import.meta.url).pathname, '..', '..', '..', '..');
 export const MANAGED_DIRECTORY = path.resolve(REPOSITORY_ROOT, 'contracts', 'v2', 'managed');
+
+/**
+ * testkit-js interpolates the wallet seed into an info message while building
+ * a wallet. Keep every log level disabled; field redaction cannot protect an
+ * already-formatted message.
+ */
+export function createWalletLogger(destination?: pino.DestinationStream): pino.Logger {
+  return pino({ level: 'silent' }, destination);
+}
 
 const envUrl = (name: string, fallback: string): string => {
   const value = process.env[name]?.trim();
@@ -128,6 +138,118 @@ export function recordPath(address: string): string {
   return configured
     ? path.resolve(configured)
     : path.resolve(REPOSITORY_ROOT, '.local', 'deployments', `v2-stagenet-${address}.json`);
+}
+
+/** Prove the record directory is writable before a deployment can spend funds. */
+export function preflightRecordOutput(): void {
+  const destination = recordPath('preflight');
+  if (existsSync(destination) && statSync(destination).isDirectory()) {
+    throw new Error(`Deployment record output is a directory: ${destination}`);
+  }
+  mkdirSync(path.dirname(destination), { recursive: true });
+  const probe = `${destination}.write-test.${process.pid}`;
+  const renamedProbe = `${probe}.renamed`;
+  try {
+    writeFileSync(probe, '', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    renameSync(probe, renamedProbe);
+  } finally {
+    if (existsSync(probe)) unlinkSync(probe);
+    if (existsSync(renamedProbe)) unlinkSync(renamedProbe);
+  }
+}
+
+export interface ConfirmedDeploymentTransaction {
+  readonly contractAddress: string;
+  readonly txId: string;
+}
+
+/** Emit recovery identity before record/indexer work can fail. */
+export function reportConfirmedDeployment(
+  transaction: ConfirmedDeploymentTransaction,
+  log: (message: string) => void = console.log,
+): string {
+  const address = transaction.contractAddress;
+  log(`[deploy] confirmed stagenet contract ${address}`);
+  log(`[deploy] confirmed transaction ${transaction.txId}`);
+  log(`STAGENET_ADDRESS=${address}`);
+  return address;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function priorVerificationHistory(existing: Record<string, unknown>): Record<string, unknown>[] {
+  if (Array.isArray(existing.verificationHistory)) {
+    return existing.verificationHistory.filter(isRecord);
+  }
+  if (isRecord(existing.verification)) return [existing.verification];
+  if (
+    existing.recordKind === 'verification-only' &&
+    typeof existing.sourceCommit === 'string' &&
+    typeof existing.artifactSha256 === 'string' &&
+    typeof existing.verifiedAt === 'string'
+  ) {
+    return [{
+      sourceCommit: existing.sourceCommit,
+      artifactSha256: existing.artifactSha256,
+      compatibility: existing.compatibility,
+      network: existing.network,
+      verifiedAt: existing.verifiedAt,
+    }];
+  }
+  return [];
+}
+
+export function mergeVerificationRecord(input: {
+  existing?: Record<string, unknown>;
+  network: Record<string, unknown>;
+  verified: Verification;
+  verificationSourceCommit: string;
+  verificationArtifactSha256: string;
+  verifiedAt: string;
+}): Record<string, unknown> {
+  const { existing = {}, network, verified, verificationSourceCommit, verificationArtifactSha256, verifiedAt } = input;
+  const existingAddress = typeof existing.contractAddress === 'string'
+    ? existing.contractAddress.replace(/^0x/i, '').toLowerCase()
+    : undefined;
+  if (existingAddress && existingAddress !== verified.address) {
+    throw new Error(`Existing deployment record address ${existingAddress} does not match verified address ${verified.address}.`);
+  }
+
+  const verification = {
+    sourceCommit: verificationSourceCommit,
+    artifactSha256: verificationArtifactSha256,
+    compatibility: COMPATIBILITY,
+    network,
+    verifiedAt,
+  };
+  const common = {
+    schemaVersion: 2,
+    contractAddress: verified.address,
+    verificationStatus: 'verified',
+    metadata: verified.metadata,
+    verifierKeys: verified.verifierKeys,
+    maintenanceAuthority: verified.authority,
+    verifiedAt,
+    verification,
+    verificationHistory: [...priorVerificationHistory(existing), verification],
+  };
+
+  const hasDeploymentProvenance = existing.recordKind === 'deployment' ||
+    Object.prototype.hasOwnProperty.call(existing, 'deploymentTransaction');
+  if (hasDeploymentProvenance) {
+    return {
+      ...existing,
+      ...common,
+      recordKind: 'deployment',
+    };
+  }
+
+  return {
+    ...common,
+    recordKind: 'verification-only',
+  };
 }
 
 export function readRecord(address: string): Record<string, unknown> | undefined {

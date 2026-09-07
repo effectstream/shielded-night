@@ -6,12 +6,15 @@ import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { MidnightWalletProvider, initializeMidnightProviders } from '@midnight-ntwrk/testkit-js';
 import { NetworkId, validateMnemonic } from '@midnightntwrk/wallet-sdk';
 import { mnemonicToSeedSync } from '@scure/bip39';
-import pino from 'pino';
 import { Contract } from '../managed/contract/index.js';
 import {
   artifactSha256,
   COMPATIBILITY,
+  createWalletLogger,
   MANAGED_DIRECTORY,
+  mergeVerificationRecord,
+  preflightRecordOutput,
+  reportConfirmedDeployment,
   sourceCommit,
   stagenet,
   verifyAddress,
@@ -39,9 +42,17 @@ async function main() {
   if (requested !== 'stagenet') throw new Error('The v2 deployment command only supports MN_ENV=stagenet.');
   const profile = stagenet();
   const environment = { ...profile, walletNetworkId: NetworkId.NetworkId.StageNet };
+  // All provenance and output checks happen before wallet startup or a funded
+  // transaction. After deployContract resolves, the address is printed before
+  // any record or indexer operation that can fail.
+  const deploymentSourceCommit = sourceCommit();
+  const deploymentArtifactSha256 = artifactSha256();
+  preflightRecordOutput();
   setNetworkId(profile.networkId);
 
-  const wallet = await MidnightWalletProvider.build(pino({ level: 'info' }), environment, deploymentSeed());
+  // testkit-js logs the seed at info level; deployment logging must remain
+  // silent because structured redaction cannot remove an interpolated secret.
+  const wallet = await MidnightWalletProvider.build(createWalletLogger(), environment, deploymentSeed());
   await wallet.start(true);
   try {
     const providers = initializeMidnightProviders(wallet, environment, {
@@ -60,9 +71,10 @@ async function main() {
       args: ['Shielded Night', 'sNight', 6n],
     } as never);
     const transaction = deployed.deployTxData.public;
-    const address = transaction.contractAddress;
+    const address = reportConfirmedDeployment(transaction);
     const provenance = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      recordKind: 'deployment',
       network: {
         name: 'stagenet',
         networkId: profile.networkId,
@@ -70,9 +82,9 @@ async function main() {
         indexer: profile.indexer,
       },
       contractAddress: address,
-      sourceCommit: sourceCommit(),
+      sourceCommit: deploymentSourceCommit,
       compatibility: COMPATIBILITY,
-      artifactSha256: artifactSha256(),
+      artifactSha256: deploymentArtifactSha256,
       deploymentTransaction: {
         id: transaction.txId,
         blockHeight: String(transaction.blockHeight),
@@ -80,25 +92,25 @@ async function main() {
         blockTimestamp: String(transaction.blockTimestamp),
       },
     };
-    const pendingPath = writeRecord({
+    const pendingRecord = {
       ...provenance,
       verificationStatus: 'pending',
       maintenanceAuthority: { status: 'not-yet-read' },
       recordedAt: new Date().toISOString(),
-    }, address);
-    console.log(`[deploy] confirmed stagenet contract ${address}`);
+    };
+    const pendingPath = writeRecord(pendingRecord, address);
     console.log(`[deploy] confirmation record ${pendingPath}`);
-    console.log(`STAGENET_ADDRESS=${address}`);
 
     const verified = await verifyAddress(providers.publicDataProvider, address);
-    const record = {
-      ...provenance,
-      verificationStatus: 'verified',
-      metadata: verified.metadata,
-      verifierKeys: verified.verifierKeys,
-      maintenanceAuthority: verified.authority,
-      verifiedAt: new Date().toISOString(),
-    };
+    const verifiedAt = new Date().toISOString();
+    const record = mergeVerificationRecord({
+      existing: pendingRecord,
+      network: provenance.network,
+      verified,
+      verificationSourceCommit: deploymentSourceCommit,
+      verificationArtifactSha256: deploymentArtifactSha256,
+      verifiedAt,
+    });
     const recordPath = writeRecord(record, verified.address);
     console.log(`[deploy] verified stagenet contract ${verified.address}`);
     console.log(`[deploy] maintenance authority locked=${verified.authority.locked}`);

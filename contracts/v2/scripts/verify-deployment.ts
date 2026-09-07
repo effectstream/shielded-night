@@ -4,7 +4,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import {
   artifactSha256,
-  COMPATIBILITY,
+  mergeVerificationRecord,
   readRecord,
   sourceCommit,
   stagenet,
@@ -26,25 +26,19 @@ async function main() {
   try {
     const verified = await verifyAddress(publicDataProvider, address);
     const existing = readRecord(verified.address) ?? {};
-    const record = {
-      ...existing,
-      schemaVersion: 1,
+    const record = mergeVerificationRecord({
+      existing,
       network: {
         name: 'stagenet',
         networkId: profile.networkId,
         node: profile.node,
         indexer: profile.indexer,
       },
-      contractAddress: verified.address,
-      sourceCommit: sourceCommit(),
-      compatibility: COMPATIBILITY,
-      artifactSha256: artifactSha256(),
-      verificationStatus: 'verified',
-      metadata: verified.metadata,
-      verifierKeys: verified.verifierKeys,
-      maintenanceAuthority: verified.authority,
+      verified,
+      verificationSourceCommit: sourceCommit(),
+      verificationArtifactSha256: artifactSha256(),
       verifiedAt: new Date().toISOString(),
-    };
+    });
     const recordPath = writeRecord(record, verified.address);
     console.log(`[verify:v2] code and metadata match ${verified.address}`);
     console.log(`[verify:v2] maintenance authority locked=${verified.authority.locked}`);
