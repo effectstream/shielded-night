@@ -97,6 +97,8 @@ addresses** and is committed (the deployed address lives in git history).
 
 Contract deployment is a local-host operation; the GitHub workflow only builds and uploads the static website. Install the isolated v2 dependency tree, reproduce the compiler 0.34.0 artifacts, and run the deployer with a funded, DUST-registered Stagenet wallet and a compatible proof server (the default proof-server URL is `http://127.0.0.1:6300`):
 
+The configured deployment is `052051d38424bcb5e1b6616598aed7863fbe5e6a2db55215ef9ad45fc2bc1403`, transaction `00ef87fbc290dd8720ca4c2748f3144ca590ce2f9aa7b5409e1d20f8d5121162a2`, from source `f23f39a74a5dc2f90a73e7b718ccdef03f825fac`. Its metadata and all 11 verifier keys match the committed compiler 0.34.0 artifacts; its intentionally unlocked 1-of-1 maintenance authority matches the durably retained key's public identity. The earlier `e42e55384b2aa147e098d0da487db219e8cdf4c3d74261ff16b800b1d95bbec6` deployment remains historical evidence and is not configured because its maintenance key was not retained.
+
 ```bash
 npm --prefix contracts/v2 ci
 bun run compact:v2
