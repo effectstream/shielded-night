@@ -56,7 +56,7 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 │       └── lib/                     # connector, providers, walletAdapter, contract, swap, tokens, networks, runtime-config
 ├── .github/workflows/
 │   ├── ci.yml                       # unit, frontend, byte-exact rebuild, integration
-│   └── deploy.yml                   # manual-only frontend deploy to Cloudflare Pages
+│   └── deploy.yml                   # automatic production + manual preview Pages deploy
 ├── TESTING.md
 └── README.md
 ```
@@ -90,6 +90,29 @@ MN_ENV=preview bun run scripts/deploy-and-lock.ts
 Two `.env` files, opposite policies: the root `.env` holds **secrets** and is
 gitignored; [frontend/.env](frontend/.env) holds only **public contract
 addresses** and is committed (the deployed address lives in git history).
+
+### Deploying the 2.x contract to Stagenet
+
+Contract deployment is a local-host operation; the GitHub workflow only builds and uploads the static website. Install the isolated v2 dependency tree, reproduce the compiler 0.34.0 artifacts, and run the deployer with a funded, DUST-registered Stagenet wallet and a compatible proof server (the default proof-server URL is `http://127.0.0.1:6300`):
+
+```bash
+npm --prefix contracts/v2 ci
+bun run compact:v2
+
+# Read WALLET_SEED from an existing private file without copying it into this repo.
+MN_WALLET_ENV_FILE=/private/path/to/wallet.env MN_ENV=stagenet bun run deploy:v2
+
+# Or use MN_MNEMONIC / MN_SEED from the gitignored root .env shown above.
+MN_ENV=stagenet bun run deploy:v2
+```
+
+The deployer confirms the transaction, compares the on-chain circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
+
+```bash
+MN_ENV=stagenet CV_ADDRESS=<deployed-address> bun run verify:deployment:v2
+```
+
+That committed public address becomes part of the frontend build; after the change reaches `main` and same-SHA CI succeeds, the Pages workflow below publishes it automatically. Never commit the wallet file, seed, mnemonic, or `.local` deployment record.
 
 ### Deploying into a stack you already have
 
@@ -245,13 +268,20 @@ Unit tests run every circuit against an in-memory context, including security an
 | **Byte-exact rebuild** | Deletes `src/managed/`, recompiles `src/shielded-night.compact` into the empty tree, and asserts the result is identical to what was committed. Deliberately uncached, and deliberately deleting first — either shortcut would let the job compare the artifacts against themselves and pass without verifying anything. This is what backs the verifiability claim above. ~15s. |
 | **Integration tests** | Full docker stack: node + indexer + proof server. |
 
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and ships it to Cloudflare Pages. It is **`workflow_dispatch` only** — nothing deploys on a merge. The `branch` input picks the target: `main` is the production URL, anything else (default `preview`) gets a throwaway preview URL. The run summary records the contract addresses baked into the bundle.
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and uploads `frontend/dist` to the existing Cloudflare Pages project. A successful push-triggered CI run for the repository's current `main` commit automatically publishes that exact commit to `shielded-night.pages.dev`. Failed CI, pull-request CI, fork-originated runs, and CI for a commit that is no longer current `main` cannot publish. Production runs share a serialized concurrency lane and recheck `main` after waiting, so a late older CI completion cannot cancel or overwrite a newer release.
+
+The workflow also retains manual dispatch. Select the source ref in GitHub's **Run workflow** control, then set `branch`:
+
+- `preview` (the default), or another valid branch name, builds that selected ref and creates a Cloudflare preview deployment.
+- `main` publishes production only when the selected source is the current `main` commit and that exact SHA already has successful push-triggered CI. This validation prevents a manual run from bypassing CI.
+
+The run summary records the source SHA, Pages branch, and public contract addresses baked into the bundle. GitHub documents why privileged [`workflow_run` jobs must not run untrusted source](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run); the workflow therefore checks the triggering repository, event, branch, conclusion and SHA before checkout. Cloudflare documents this prebuilt-asset flow as [Pages Direct Upload with continuous integration](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
 
 It needs two repository secrets:
 
 | Secret | Where to get it |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens, using the **Edit Cloudflare Workers** template (Pages deploys use the same permission). |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens, scoped to the correct account with **Cloudflare Pages: Edit**. Store only the token value, without the `Bearer` prefix. |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages, in the right-hand sidebar. |
 
-Each `branch` value maps to a GitHub environment (`production` / `preview`), so production deploys can be put behind required reviewers in the repo's environment settings.
+Store both as GitHub Actions secrets available to this public repository. Each target maps to a GitHub environment (`production` / `preview`); environment protection rules can add approval gates independently of the source and CI checks above.

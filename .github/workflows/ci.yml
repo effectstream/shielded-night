@@ -10,12 +10,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
-  COMPACT_VERSION: '0.31.1'
+  COMPACT_V1_VERSION: '0.31.1'
+  COMPACT_V2_VERSION: '0.34.0'
 
 jobs:
-  unit:
-    name: Unit tests (simulator)
+  unit-v1:
+    name: Unit tests (v1 simulator)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -30,7 +34,7 @@ jobs:
       - name: Setup Compact compiler
         uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
         with:
-          compact-version: ${{ env.COMPACT_VERSION }}
+          compact-version: ${{ env.COMPACT_V1_VERSION }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -44,6 +48,37 @@ jobs:
 
       - name: Run unit tests
         run: bun run test:unit
+
+  unit-v2:
+    name: Unit tests (v2 simulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Setup Compact compiler
+        uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
+        with:
+          compact-version: ${{ env.COMPACT_V2_VERSION }}
+
+      - name: Install v2 dependencies
+        run: npm ci
+        working-directory: contracts/v2
+
+      - name: Compile v2 contract
+        run: bun run compact:v2:fast
+
+      - name: Typecheck v2 package
+        run: bun run typecheck:v2
+
+      - name: Run v2 unit tests
+        run: bun run test:v2
 
   frontend:
     name: Frontend (typecheck + build)
@@ -82,8 +117,8 @@ jobs:
         run: bun run build
         working-directory: frontend
 
-  reproducible-build:
-    name: Byte-exact contract rebuild
+  reproducible-build-v1:
+    name: Byte-exact v1 contract rebuild
     runs-on: ubuntu-latest
     # Full ZK key generation for all 11 circuits measures ~15s; the headroom is
     # for a cold compiler install.
@@ -93,10 +128,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      - name: Setup Compact compiler
+      - name: Setup Compact v1 compiler
         uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
         with:
-          compact-version: ${{ env.COMPACT_VERSION }}
+          compact-version: ${{ env.COMPACT_V1_VERSION }}
 
       # Deliberately NOT cached: restoring src/managed would compare the
       # committed artifacts against themselves and prove nothing. No `bun
@@ -108,18 +143,47 @@ jobs:
       # files untouched and the diff below would pass while having verified
       # nothing — a green run indistinguishable from a real one. Compiling into
       # an empty tree makes the assertion mean what it claims.
-      - name: Recompile contract from source
+      - name: Recompile v1 contract from source
         run: |
           rm -rf src/managed
           bun run compact
 
       # `--intent-to-add` stages untracked paths so `git diff` reports files the
       # compiler ADDED, not just ones it changed or removed.
-      - name: Assert src/managed is unchanged
+      - name: Assert v1 artifacts are unchanged
         run: |
           git add --intent-to-add -A src/managed
           if ! git diff --exit-code --stat -- src/managed; then
-            echo "::error::Recompiling src/shielded-night.compact with compact ${COMPACT_VERSION} did not reproduce the committed src/managed/. The deployed contract's verifiability claim (README 'Verifying the deployment') depends on this being byte-exact — commit the regenerated artifacts or investigate the toolchain difference."
+            echo "::error::Recompiling src/shielded-night.compact with compact ${COMPACT_V1_VERSION} did not reproduce the committed src/managed/. The deployed contract's verifiability claim (README 'Verifying the deployment') depends on this being byte-exact — commit the regenerated artifacts or investigate the toolchain difference."
+            exit 1
+          fi
+
+  reproducible-build-v2:
+    name: Byte-exact v2 contract rebuild
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Setup Compact v2 compiler
+        uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
+        with:
+          compact-version: ${{ env.COMPACT_V2_VERSION }}
+
+      # Compile into an empty tree so this cannot pass by comparing the
+      # committed artifacts with themselves. The compiler is standalone.
+      - name: Recompile v2 contract from source
+        run: |
+          rm -rf contracts/v2/managed
+          bun run compact:v2
+
+      - name: Assert v2 artifacts are unchanged
+        run: |
+          git add --intent-to-add -A contracts/v2/managed
+          if ! git diff --exit-code --stat -- contracts/v2/managed; then
+            echo "::error::Recompiling contracts/v2/shielded-night.compact with compact ${COMPACT_V2_VERSION} did not reproduce the committed contracts/v2/managed/. Commit the regenerated artifacts or investigate the toolchain difference."
             exit 1
           fi
 
@@ -139,7 +203,7 @@ jobs:
       - name: Setup Compact compiler
         uses: midnightntwrk/setup-compact-action@b622629bee2c06d0f8b4db5b62a93f98dcbd41bf
         with:
-          compact-version: ${{ env.COMPACT_VERSION }}
+          compact-version: ${{ env.COMPACT_V1_VERSION }}
 
       # docker.io rate-limits anonymous pulls from shared runners; the Google
       # mirror serves the same images without the limit (canary's pattern).
@@ -158,7 +222,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: src/managed
-          key: compact-${{ env.COMPACT_VERSION }}-${{ hashFiles('src/shielded-night.compact') }}
+          key: compact-${{ env.COMPACT_V1_VERSION }}-${{ hashFiles('src/shielded-night.compact') }}
 
       - name: Compile contract
         if: steps.compact-cache.outputs.cache-hit != 'true'
