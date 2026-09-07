@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ShieldedNightState } from '../hooks/useShieldedNight';
 import { errMsg } from '../hooks/useShieldedNight';
 import { formatAmount } from '../lib/tokens';
@@ -7,29 +7,37 @@ import { loadPending, type PendingSwap, removePending, resumeSwap } from '../lib
 export function PendingSwaps({ sn }: { sn: ShieldedNightState }) {
   const [pending, setPending] = useState<PendingSwap[]>([]);
   const [busyId, setBusyId] = useState<string>();
+  const mounted = useRef(true);
 
   const addr = sn.contractAddress;
 
   const reload = () => setPending(addr ? loadPending(addr) : []);
   useEffect(reload, [addr, sn.connected]);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   // Only the second leg (step === 'deposited') is safely resumable.
   const resumable = pending.filter((s) => s.step === 'deposited');
   if (!addr || resumable.length === 0) return null;
 
   async function onResume(s: PendingSwap) {
-    if (!sn.providers || !addr) return;
+    if (!sn.session || !addr) return;
     setBusyId(s.id);
     try {
-      await resumeSwap(sn.providers, addr, s, sn.coinPublicKey ?? '', sn.unshieldedAddress ?? '', {
-        onLog: sn.appendLog,
+      await resumeSwap(sn.session, addr, s, {
+        onLog: (message) => {
+          if (mounted.current) sn.appendLog(message);
+        },
       });
-      await sn.refreshBalances();
+      if (mounted.current) await sn.refreshBalances();
     } catch (e) {
-      sn.appendLog('Resume failed: ' + errMsg(e));
+      if (mounted.current) sn.appendLog('Resume failed: ' + errMsg(e));
     } finally {
-      setBusyId(undefined);
-      reload();
+      if (mounted.current) {
+        setBusyId(undefined);
+        reload();
+      }
     }
   }
 

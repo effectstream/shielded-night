@@ -39,7 +39,7 @@ export const RUNTIME_CONFIG_GLOBAL = 'SHIELDED_NIGHT';
 export type ContractAddressVar =
   | 'PREVIEW_ADDRESS'
   | 'PREPROD_ADDRESS'
-  | 'MAINNET_ADDRESS'
+  | 'STAGENET_ADDRESS'
   | 'UNDEPLOYED_ADDRESS';
 
 /** Shape of `window.SHIELDED_NIGHT`. Every key optional: inject only what the deployment knows. */

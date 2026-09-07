@@ -1,232 +1,298 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ContractState } from '@midnight-ntwrk/compact-runtime';
 import type { ConnectedAPI, InitialAPI } from '@midnight-ntwrk/dapp-connector-api';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js/network-id';
-import { findInitialAPIs, isCompatibleApiVersion } from '../lib/connector';
-import { buildProviders } from '../lib/providers';
-import { ledger, type ShieldedNightProviders } from '../lib/contract';
-import { contractAddressFor, NETWORKS, type NetworkOption } from '../lib/networks';
-import { deriveWrapperColorHex, nativeNightKeys, pickBalance } from '../lib/tokens';
-
-export interface Balances {
-  nativeNight: bigint;
-  wrapper: bigint;
-  wrapperMatched: boolean;
-  nativeTokenId?: string;
-  wrapperTokenId?: string;
-  allShielded: Record<string, bigint>;
-  allUnshielded: Record<string, bigint>;
-}
+import { connectWallet, findInitialAPIs, isCompatibleApiVersion } from '../lib/connector';
+import {
+  contractAddressFor,
+  contractConfigurationError,
+  NETWORKS,
+  type NetworkOption,
+} from '../lib/networks';
+import type {
+  Balances,
+  Direction,
+  ProtocolFamily,
+  ProtocolSession,
+  SwapCallbacks,
+} from '../../protocols/shared/types';
 
 export interface ShieldedNightState {
   networkKey: NetworkOption['key'];
-  setNetworkKey: (k: NetworkOption['key']) => void;
+  setNetworkKey: (key: NetworkOption['key']) => void;
   contractAddress: string | undefined;
+  configurationError: string | undefined;
+  protocolFamily: ProtocolFamily;
 
   availableAPIs: InitialAPI[];
   detecting: boolean;
-
   connecting: boolean;
   connected: boolean;
+  operationPending: boolean;
   walletName?: string;
   connectedAPI?: ConnectedAPI;
-  providers?: ShieldedNightProviders;
+  session?: ProtocolSession;
   coinPublicKey?: string;
   unshieldedAddress?: string;
   networkIdConnected?: string;
 
   balances?: Balances;
   refreshBalances: () => Promise<void>;
-  /** The wrapper (sNight) 32-byte color hex for the selected network, if known. */
+  convert: (direction: Direction, amount: bigint, callbacks?: SwapCallbacks) => Promise<void>;
   wrapperColorHex?: string;
-  /** Wrapper token metadata read from the contract's public ledger, once connected. */
   tokenName?: string;
   tokenSymbol?: string;
 
   connect: (api: InitialAPI) => Promise<void>;
   disconnect: () => void;
-
   logs: string[];
-  appendLog: (msg: string) => void;
+  appendLog: (message: string) => void;
   error?: string;
+}
+
+export function errMsg(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  for (let depth = 0; current != null && depth < 10 && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (typeof current === 'object') {
+      const value = current as { message?: unknown; code?: unknown; reason?: unknown; cause?: unknown };
+      const details: string[] = [];
+      if (typeof value.message === 'string' && value.message && value.message !== 'Error') details.push(value.message);
+      if (typeof value.code === 'string') details.push(`code=${value.code}`);
+      if (typeof value.reason === 'string' && value.reason) details.push(`reason=${value.reason}`);
+      if (details.length > 0) parts.push(details.join(' '));
+      current = value.cause;
+    } else {
+      parts.push(String(current));
+      break;
+    }
+  }
+  if (parts.length === 0) {
+    try {
+      return error instanceof Error ? error.message : JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return parts.join(' ← ');
 }
 
 export function useShieldedNight(): ShieldedNightState {
   const [networkKey, setNetworkKeyState] = useState<NetworkOption['key']>('preview');
   const [availableAPIs, setAvailableAPIs] = useState<InitialAPI[]>([]);
   const [detecting, setDetecting] = useState(true);
-
   const [connecting, setConnecting] = useState(false);
+  const [operationPending, setOperationPending] = useState(false);
   const [connectedAPI, setConnectedAPI] = useState<ConnectedAPI>();
-  const [providers, setProviders] = useState<ShieldedNightProviders>();
-  const [coinPublicKey, setCoinPublicKey] = useState<string>();
-  const [unshieldedAddress, setUnshieldedAddress] = useState<string>();
-  const [networkIdConnected, setNetworkIdConnected] = useState<string>();
+  const [session, setSession] = useState<ProtocolSession>();
   const [walletName, setWalletName] = useState<string>();
   const [balances, setBalances] = useState<Balances>();
   const [tokenName, setTokenName] = useState<string>();
   const [tokenSymbol, setTokenSymbol] = useState<string>();
   const [logs, setLogs] = useState<string[]>([]);
   const [error, setError] = useState<string>();
+  const sessionRef = useRef<ProtocolSession>();
+  const generation = useRef(0);
 
-  const appendLog = useCallback((msg: string) => {
-    const line = `${new Date().toLocaleTimeString()}  ${msg}`;
-    setLogs((prev) => [line, ...prev].slice(0, 200));
-  }, []);
-
-  const network = NETWORKS.find((n) => n.key === networkKey)!;
+  const network = NETWORKS.find((item) => item.key === networkKey)!;
   const contractAddress = contractAddressFor(networkKey);
-  const wrapperColorHex = contractAddress ? deriveWrapperColorHex(contractAddress) ?? undefined : undefined;
+  const configurationError = contractConfigurationError(networkKey);
 
-  // Poll window.midnight for injected wallets.
-  useEffect(() => {
-    let attempts = 0;
-    const id = setInterval(() => {
-      const apis = findInitialAPIs();
-      if (apis.length > 0) {
-        setAvailableAPIs(apis);
-        setDetecting(false);
-        clearInterval(id);
-      } else if (++attempts > 40) {
-        setDetecting(false);
-        clearInterval(id);
-      }
-    }, 500);
-    return () => clearInterval(id);
+  const appendLog = useCallback((message: string) => {
+    const line = `${new Date().toLocaleTimeString()}  ${message}`;
+    setLogs((previous) => [line, ...previous].slice(0, 200));
   }, []);
 
-  // Read the wrapper token metadata (name/symbol) straight from public contract
-  // state - sealed ledger fields, so no proving and no wallet call needed.
+  const resetConnection = useCallback(() => {
+    generation.current += 1;
+    sessionRef.current?.dispose();
+    sessionRef.current = undefined;
+    setConnectedAPI(undefined);
+    setSession(undefined);
+    setWalletName(undefined);
+    setBalances(undefined);
+    setTokenName(undefined);
+    setTokenSymbol(undefined);
+    setConnecting(false);
+    setOperationPending(false);
+  }, []);
+
+  useEffect(() => () => sessionRef.current?.dispose(), []);
+
   useEffect(() => {
-    let cancelled = false;
-    if (!providers || !contractAddress) {
-      setTokenName(undefined);
-      setTokenSymbol(undefined);
+    const discover = () => {
+      const found = findInitialAPIs();
+      setAvailableAPIs(found);
+      setDetecting(false);
+      if (found.length === 0) setError('No Midnight wallet extension detected.');
+      else setError((value) => value === 'No Midnight wallet extension detected.' ? undefined : value);
+    };
+    discover();
+    const timer = window.setInterval(discover, 1_500);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const setNetworkKey = useCallback((key: NetworkOption['key']) => {
+    if (key === networkKey) return;
+    resetConnection();
+    setError(undefined);
+    setNetworkKeyState(key);
+    appendLog(`Selected ${NETWORKS.find((item) => item.key === key)?.label ?? key}; reconnect required.`);
+  }, [appendLog, networkKey, resetConnection]);
+
+  const connect = useCallback(async (api: InitialAPI) => {
+    if (configurationError || !contractAddress) {
+      setError(configurationError ?? 'The selected network has no valid contract address.');
       return;
     }
-    void (async () => {
-      try {
-        const state = await providers.publicDataProvider.queryContractState(contractAddress);
-        if (cancelled || state == null) return;
-        // queryContractState deserializes with ledger-v8's WASM module, while
-        // the compiled contract's ledger() expects compact-runtime's classes -
-        // instanceof fails across the two WASM instances in the browser bundle
-        // ("expected instance of ..."). Cross the boundary via bytes: serialize
-        // with one module, deserialize with the other (byte-compatible wire
-        // format, verified against the live contract).
-        const runtimeState = ContractState.deserialize(state.serialize());
-        const l = ledger(runtimeState.data);
-        setTokenName(l._name);
-        setTokenSymbol(l._symbol);
-      } catch (e) {
-        appendLog('Failed to read token metadata: ' + errMsg(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [providers, contractAddress, appendLog]);
-
-  const apiRef = useRef<ConnectedAPI>();
-  apiRef.current = connectedAPI;
-
-  const refreshBalances = useCallback(async () => {
-    const api = apiRef.current;
-    if (!api) return;
-    try {
-      const [shielded, unshielded] = await Promise.all([api.getShieldedBalances(), api.getUnshieldedBalances()]);
-      const native = pickBalance(unshielded, nativeNightKeys());
-      const derived = contractAddress ? deriveWrapperColorHex(contractAddress) : null;
-      const wrap = pickBalance(shielded, derived ? [derived] : [], derived);
-      setBalances({
-        nativeNight: native?.value ?? 0n,
-        wrapper: wrap?.value ?? 0n,
-        wrapperMatched: wrap != null,
-        nativeTokenId: native?.key ?? nativeNightKeys()[0],
-        wrapperTokenId: wrap?.key ?? derived ?? undefined,
-        allShielded: shielded,
-        allUnshielded: unshielded,
-      });
-    } catch (e) {
-      appendLog('Failed to fetch balances: ' + errMsg(e));
+    if (!isCompatibleApiVersion(api.apiVersion)) {
+      setError(`Wallet connector ${api.apiVersion} is unsupported; install a wallet exposing connector API 4.x.`);
+      return;
     }
-  }, [appendLog, contractAddress, networkKey]);
 
-  const setNetworkKey = useCallback((k: NetworkOption['key']) => {
-    setNetworkKeyState(k);
-    // Reset any existing connection; the wallet must reconnect on the new net.
-    setConnectedAPI(undefined);
-    setProviders(undefined);
-    setBalances(undefined);
+    resetConnection();
+    const requestGeneration = generation.current;
+    let created: ProtocolSession | undefined;
+    setConnecting(true);
     setError(undefined);
-  }, []);
-
-  const connect = useCallback(
-    async (api: InitialAPI) => {
-      setConnecting(true);
-      setError(undefined);
-      try {
-        if (!isCompatibleApiVersion(api.apiVersion)) {
-          appendLog(`Warning: wallet API v${api.apiVersion} may be incompatible (built for 4.x).`);
-        }
-        setNetworkId(network.networkId as never);
-        appendLog(`Connecting to ${api.name} on ${network.networkId}…`);
-        const connectedApi = await api.connect(network.networkId);
-        const config = await connectedApi.getConfiguration();
-        setNetworkId(config.networkId as never);
-        setNetworkIdConnected(config.networkId);
-        appendLog(`Connected. Network ${config.networkId}, indexer ${config.indexerUri}`);
-
-        const [shieldedAddr, unshieldedAddr] = await Promise.all([
-          connectedApi.getShieldedAddresses(),
-          connectedApi.getUnshieldedAddress(),
-        ]);
-        const built = await buildProviders(connectedApi);
-
-        setConnectedAPI(connectedApi);
-        apiRef.current = connectedApi;
-        setProviders(built);
-        setCoinPublicKey(shieldedAddr.shieldedCoinPublicKey);
-        setUnshieldedAddress(unshieldedAddr.unshieldedAddress);
-        setWalletName(api.name);
-        await refreshBalances();
-      } catch (e) {
-        setError(errMsg(e));
-        appendLog('Connect failed: ' + errMsg(e));
-      } finally {
-        setConnecting(false);
+    appendLog(`Connecting ${api.name} to ${network.label} (${network.protocolFamily})…`);
+    try {
+      const apiConnection = await connectWallet(api, network.networkId);
+      if (generation.current !== requestGeneration) return;
+      const configuration = await apiConnection.getConfiguration();
+      if (generation.current !== requestGeneration) return;
+      if (configuration.networkId !== network.networkId) {
+        throw new Error(`Wallet connected to ${configuration.networkId}; select ${network.networkId} in the wallet.`);
       }
-    },
-    [appendLog, network.networkId, refreshBalances],
-  );
+
+      created = network.protocolFamily === 'midnight-1.x'
+        ? await import('../../protocols/v1/src/adapter').then((module) =>
+          module.createV1Adapter(apiConnection, network.networkId, contractAddress))
+        : await import('../../protocols/v2/src/adapter').then((module) =>
+          module.createV2Adapter(apiConnection, network.networkId, contractAddress));
+      if (!created) throw new Error('The selected protocol adapter did not create a session.');
+      if (generation.current !== requestGeneration) {
+        created.dispose();
+        return;
+      }
+
+      sessionRef.current = created;
+      setConnectedAPI(apiConnection);
+      setSession(created);
+      setWalletName(api.name);
+      const [freshBalances, metadata] = await Promise.all([
+        created.refreshBalances(),
+        created.readMetadata(),
+      ]);
+      if (generation.current !== requestGeneration || sessionRef.current !== created) return;
+      setBalances(freshBalances);
+      setTokenName(metadata.name);
+      setTokenSymbol(metadata.symbol);
+      appendLog(`Connected to ${network.label}; loaded ${metadata.symbol}.`);
+    } catch (caught) {
+      created?.dispose();
+      if (generation.current === requestGeneration) {
+        sessionRef.current = undefined;
+        setSession(undefined);
+        setConnectedAPI(undefined);
+        setWalletName(undefined);
+        setError(errMsg(caught));
+        appendLog(`Connection failed: ${errMsg(caught)}`);
+      }
+    } finally {
+      if (generation.current === requestGeneration) setConnecting(false);
+    }
+  }, [appendLog, configurationError, contractAddress, network, resetConnection]);
 
   const disconnect = useCallback(() => {
-    setConnectedAPI(undefined);
-    setProviders(undefined);
-    setBalances(undefined);
-    setCoinPublicKey(undefined);
-    setUnshieldedAddress(undefined);
-    setWalletName(undefined);
+    resetConnection();
+    setError(undefined);
     appendLog('Disconnected.');
-  }, [appendLog]);
+  }, [appendLog, resetConnection]);
+
+  const refreshBalances = useCallback(async () => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) return;
+    const requestGeneration = generation.current;
+    try {
+      const fresh = await activeSession.refreshBalances();
+      if (generation.current === requestGeneration && sessionRef.current === activeSession) {
+        setBalances(fresh);
+      }
+    } catch (caught) {
+      if (generation.current === requestGeneration && sessionRef.current === activeSession) {
+        setError(errMsg(caught));
+        throw caught;
+      }
+    }
+  }, []);
+
+  const convert = useCallback(async (
+    direction: Direction,
+    amount: bigint,
+    callbacks: SwapCallbacks = {},
+  ) => {
+    const activeSession = sessionRef.current;
+    if (!activeSession) throw new Error('Connect a wallet before converting.');
+    const requestGeneration = generation.current;
+    setOperationPending(true);
+    setError(undefined);
+    const isCurrent = () => generation.current === requestGeneration && sessionRef.current === activeSession;
+    const syncCoinState = () => {
+      if (!isCurrent()) return;
+      const coinState = activeSession.wrapperCoinState();
+      setBalances((current) => current ? {
+        ...current,
+        trackedWrapperCoins: coinState.available,
+        blockedWrapperCoins: coinState.blocked,
+      } : current);
+    };
+    try {
+      await activeSession.convert(direction, amount, {
+        onLog: (message) => {
+          if (isCurrent()) callbacks.onLog?.(message);
+        },
+        onStep: (step, label) => {
+          if (isCurrent()) callbacks.onStep?.(step, label);
+        },
+      });
+      syncCoinState();
+      if (isCurrent()) await refreshBalances();
+    } catch (caught) {
+      if (isCurrent()) {
+        syncCoinState();
+        setError(errMsg(caught));
+        throw caught;
+      }
+      // A selected-network change invalidates the old session. If its wallet
+      // submission already completed, leave that outcome associated with the
+      // original session and suppress stale UI callbacks on the new network.
+    } finally {
+      if (isCurrent()) setOperationPending(false);
+    }
+  }, [refreshBalances]);
 
   return {
     networkKey,
     setNetworkKey,
     contractAddress,
+    configurationError,
+    protocolFamily: network.protocolFamily,
     availableAPIs,
     detecting,
     connecting,
-    connected: !!connectedAPI && !!providers,
+    connected: session !== undefined,
+    operationPending,
     walletName,
     connectedAPI,
-    providers,
-    coinPublicKey,
-    unshieldedAddress,
-    networkIdConnected,
+    session,
+    coinPublicKey: session?.coinPublicKey,
+    unshieldedAddress: session?.unshieldedAddress,
+    networkIdConnected: session?.networkId,
     balances,
     refreshBalances,
-    wrapperColorHex,
+    convert,
+    wrapperColorHex: session?.wrapperColorHex,
     tokenName,
     tokenSymbol,
     connect,
@@ -235,40 +301,4 @@ export function useShieldedNight(): ShieldedNightState {
     appendLog,
     error,
   };
-}
-
-/**
- * Deep error extraction: walks the `cause` chain and surfaces the connector's
- * DAppConnectorAPIError fields (`code`, `reason`), which often ship with an
- * empty `message` - midnight-js's String(err) wrapper reduces those to a bare
- * "Error" unless unpacked here.
- */
-export function errMsg(e: unknown): string {
-  const parts: string[] = [];
-  const seen = new Set<unknown>();
-  let cur: unknown = e;
-  for (let depth = 0; cur != null && depth < 10 && !seen.has(cur); depth++) {
-    seen.add(cur);
-    if (typeof cur === 'object') {
-      const o = cur as { message?: unknown; code?: unknown; reason?: unknown; type?: unknown; cause?: unknown };
-      const bits: string[] = [];
-      if (typeof o.message === 'string' && o.message && o.message !== 'Error') bits.push(o.message);
-      if (typeof o.code === 'string') bits.push(`code=${o.code}`);
-      if (typeof o.reason === 'string' && o.reason) bits.push(`reason=${o.reason}`);
-      if (bits.length > 0) parts.push(bits.join(' '));
-      cur = o.cause;
-    } else {
-      parts.push(String(cur));
-      break;
-    }
-  }
-  if (parts.length === 0) {
-    try {
-      return e instanceof Error ? e.message : JSON.stringify(e);
-    } catch {
-      return String(e);
-    }
-  }
-  // Innermost causes are the most informative; show the chain outer→inner.
-  return parts.join(' ← ');
 }

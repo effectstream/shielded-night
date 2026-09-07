@@ -1,30 +1,119 @@
 name: Deploy frontend
 
-# Manual only. Nothing ships on a push or a merge — a deploy is always an
-# explicit click, on an explicit ref.
+# A successful CI push for the repository's current main commit publishes to
+# production automatically. workflow_run can read secrets even when the
+# triggering workflow could not, so the deploy job rejects every other event,
+# repository, branch and conclusion before checking out or running source.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Cloudflare Pages branch — "main" is the production URL (shielded-night.pages.dev); anything else gets a throwaway preview URL.'
+        description: 'Cloudflare Pages branch. "main" requires this exact ref to be current main with successful push CI; another name creates a preview deployment.'
         type: string
         default: 'preview'
         required: true
 
-concurrency:
-  group: deploy-${{ github.event.inputs.branch }}
-  cancel-in-progress: false
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  PAGES_BRANCH: ${{ github.event_name == 'workflow_run' && 'main' || inputs.branch }}
 
 jobs:
+  validate:
+    name: Validate release source
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Refusing to deploy an invalid source SHA."
+            exit 1
+          fi
+          if [[ ! "${PAGES_BRANCH}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] ||
+             ! git check-ref-format --branch "${PAGES_BRANCH}" >/dev/null; then
+            echo "::error::Invalid Cloudflare Pages branch name."
+            exit 1
+          fi
+
+      # Production must be the current main commit. Manual production also
+      # proves that this exact SHA has a successful push-triggered CI run.
+      - name: Validate production source
+        if: env.PAGES_BRANCH == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${SOURCE_SHA}" != "${current_main}" ]]; then
+            echo "::error::Refusing stale production deploy: ${SOURCE_SHA} is not current main ${current_main}."
+            exit 1
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
+            ci_run_id="$(gh api --method GET \
+              "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+              -f branch='main' \
+              -f event='push' \
+              -f status='success' \
+              -f head_sha="${SOURCE_SHA}" \
+              -f per_page='1' \
+              --jq '.workflow_runs[0].id // empty')"
+            if [[ -z "${ci_run_id}" ]]; then
+              echo "::error::Production requires successful push CI for this exact main commit (${SOURCE_SHA})."
+              exit 1
+            fi
+            echo "Validated CI run ${ci_run_id} for ${SOURCE_SHA}."
+          fi
+
   deploy:
     name: Build and deploy to Cloudflare Pages
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Add required reviewers to this environment in the repo settings to gate
-    # production deploys behind an approval.
-    environment: ${{ github.event.inputs.branch == 'main' && 'production' || 'preview' }}
+    environment: ${{ (github.event_name == 'workflow_run' || inputs.branch == 'main') && 'production' || 'preview' }}
+    # The read-only validation gate runs before this serialized lane. Keeping
+    # cancel-in-progress false prevents a late older completion (or a failed CI
+    # event whose validation is skipped) from cancelling a newer production
+    # release. Freshness is checked again after entering the lane.
+    concurrency:
+      group: deploy-${{ github.event_name == 'workflow_run' && 'main' || inputs.branch }}
+      cancel-in-progress: false
     steps:
+      - name: Recheck queued production source
+        if: env.PAGES_BRANCH == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${SOURCE_SHA}" != "${current_main}" ]]; then
+            echo "::error::Main advanced to ${current_main} while this release was queued; refusing stale source ${SOURCE_SHA}."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -32,24 +121,37 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      # The addresses are committed in frontend/.env on purpose (public data,
-      # git history is the audit trail). Echo them so the run log records
-      # exactly which contract this bundle points at.
-      - name: Record deployed contract addresses
+      # The addresses are public and committed; the summary links the exact
+      # checked-out source and its network mappings to this Pages deployment.
+      - name: Record source and contract addresses
+        shell: bash
         run: |
-          echo "### Contract addresses in this build" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -E '^[A-Z]+_ADDRESS=' frontend/.env >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Frontend deployment"
+            echo "- Source: \`${SOURCE_SHA}\`"
+            echo "- Pages branch: \`${PAGES_BRANCH}\`"
+            echo
+            echo '```'
+            grep -E '^[A-Z]+_ADDRESS=' frontend/.env
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
-      # See the comment in ci.yml's frontend job: both installs are required for
-      # the vite dedupe to be exercised rather than bypassed.
+      # All four installs reproduce the physical dependency layout whose
+      # distinct WASM/runtime generations the frontend build keeps isolated.
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
         working-directory: frontend
+
+      - name: Install v1 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v1
+
+      - name: Install v2 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v2
 
       - name: Typecheck
         run: bun run typecheck
@@ -59,6 +161,21 @@ jobs:
         run: bun run build
         working-directory: frontend
 
+      # Narrow the race between the queued-source check and the upload. A newer
+      # release waits in the same lane and will publish after this run exits.
+      - name: Recheck production freshness
+        if: env.PAGES_BRANCH == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${SOURCE_SHA}" != "${current_main}" ]]; then
+            echo "::error::Main advanced to ${current_main} during the build; refusing stale upload of ${SOURCE_SHA}."
+            exit 1
+          fi
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -67,4 +184,4 @@ jobs:
           command: >-
             pages deploy frontend/dist
             --project-name shielded-night
-            --branch ${{ github.event.inputs.branch }}
+            --branch ${{ env.PAGES_BRANCH }}

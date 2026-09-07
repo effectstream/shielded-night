@@ -2,7 +2,7 @@
 
 Convert native **unshielded NIGHT** into **shielded sNight** (a contract-minted wrapper token) and back, on Midnight.
 
-Live (preview): https://shielded-night.pages.dev
+Live (Preview / Preprod / Stagenet selector): https://shielded-night.pages.dev
 
 ## What this is
 
@@ -56,7 +56,7 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 │       └── lib/                     # connector, providers, walletAdapter, contract, swap, tokens, networks, runtime-config
 ├── .github/workflows/
 │   ├── ci.yml                       # unit, frontend, byte-exact rebuild, integration
-│   └── deploy.yml                   # manual-only frontend deploy to Cloudflare Pages
+│   └── deploy.yml                   # automatic production + manual preview Pages deploy
 ├── TESTING.md
 └── README.md
 ```
@@ -66,12 +66,14 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 The frontend is a Vite + React app that connects to any `window.midnight` wallet (e.g. Lace), reads your NIGHT/sNight balances, and runs the atomic one-transaction swaps (one wallet approval each way). Proving is delegated to the wallet.
 
 ```bash
-cd frontend
-bun install
-bun run dev              # http://localhost:5173  (uses the committed .env)
+bun install --frozen-lockfile
+bun --cwd frontend install --frozen-lockfile
+npm --prefix frontend/protocols/v1 ci
+npm --prefix frontend/protocols/v2 ci
+bun --cwd frontend run dev   # http://localhost:5173 (uses the committed .env)
 ```
 
-Needs a Midnight wallet extension and the compiled artifacts in `src/managed/` (run `bun run compact` at the repo root if missing). Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
+Needs a Midnight wallet extension, the v1 artifacts in `src/managed/`, and the v2 artifacts in `contracts/v2/managed/`. The two protocol installs remain separate because their ledger/runtime WASM generations cannot share class identities. Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
 
 Deploy a contract (needs a funded, DUST-registered wallet). Put the deployer
 credentials in the repo-root `.env` (gitignored - template in
@@ -90,6 +92,49 @@ MN_ENV=preview bun run scripts/deploy-and-lock.ts
 Two `.env` files, opposite policies: the root `.env` holds **secrets** and is
 gitignored; [frontend/.env](frontend/.env) holds only **public contract
 addresses** and is committed (the deployed address lives in git history).
+
+### Deploying the 2.x contract to Stagenet
+
+Contract deployment is a local-host operation; the GitHub workflow only builds and uploads the static website. Install the isolated v2 dependency tree, reproduce the compiler 0.34.0 artifacts, and run the deployer with a funded, DUST-registered Stagenet wallet and a compatible proof server (the default proof-server URL is `http://127.0.0.1:6300`):
+
+The configured deployment is `052051d38424bcb5e1b6616598aed7863fbe5e6a2db55215ef9ad45fc2bc1403`, transaction `00ef87fbc290dd8720ca4c2748f3144ca590ce2f9aa7b5409e1d20f8d5121162a2`, from source `f23f39a74a5dc2f90a73e7b718ccdef03f825fac`. Its metadata and all 11 verifier keys match the committed compiler 0.34.0 artifacts; its intentionally unlocked 1-of-1 maintenance authority matches the durably retained key's public identity. The earlier `e42e55384b2aa147e098d0da487db219e8cdf4c3d74261ff16b800b1d95bbec6` deployment remains historical evidence and is not configured because its maintenance key was not retained.
+
+```bash
+npm --prefix contracts/v2 ci
+bun run compact:v2
+
+# Required durable custody path. The deployer creates or reuses this private
+# file at mode 0600 before it starts the wallet or can submit a transaction.
+mkdir -p /private/durable/shielded-night
+chmod 700 /private/durable/shielded-night
+
+# Read WALLET_SEED from an existing private file without copying it into this repo.
+MN_MAINTENANCE_KEY_FILE=/private/durable/shielded-night/stagenet-maintenance-key.json \
+MN_WALLET_ENV_FILE=/private/path/to/wallet.env MN_ENV=stagenet bun run deploy:v2
+
+# Or use MN_MNEMONIC / MN_SEED from the gitignored root .env shown above.
+MN_MAINTENANCE_KEY_FILE=/private/durable/shielded-night/stagenet-maintenance-key.json \
+MN_ENV=stagenet bun run deploy:v2
+```
+
+`MN_MAINTENANCE_KEY_FILE` is mandatory and must be an absolute path on durable storage. The file contains the maintenance signing key, so back it up securely and never print or commit it. A repeat invocation reads the existing file, enforces mode 0600, re-derives its public key and reuses that exact key. When the deployer runs inside a temporary Docker container, bind-mount the host directory and point the variable at the mounted path; a path inside an ephemeral container or volume is not durable:
+
+```bash
+docker run --rm \
+  --mount type=bind,src=/private/durable/shielded-night,dst=/run/shielded-night-private \
+  -e MN_MAINTENANCE_KEY_FILE=/run/shielded-night-private/stagenet-maintenance-key.json \
+  your-deployment-image bun run deploy:v2
+```
+
+Wallet synchronization uses a five-minute timeout by default and then requires positive NIGHT and DUST balances before provider initialization or transaction construction. Set `MN_WALLET_SYNC_TIMEOUT_MS` to an integer from `30000` through `900000` when a slower indexer needs a different bounded wait.
+
+The deployer closes and read-back validates the key file before wallet startup, passes that exact key to Midnight.js, and verifies that its derived public key is the 1-of-1 on-chain maintenance authority. It then confirms the transaction, compares the circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
+
+```bash
+MN_ENV=stagenet CV_ADDRESS=<deployed-address> bun run verify:deployment:v2
+```
+
+That committed public address becomes part of the frontend build; after the change reaches `main` and same-SHA CI succeeds, the Pages workflow below publishes it automatically. Never commit the wallet file, seed, mnemonic, or `.local` deployment record.
 
 ### Deploying into a stack you already have
 
@@ -122,7 +167,7 @@ On `undeployed` the deployer seed defaults to the genesis seed
 (`…0001`). Set `MN_SEED` to a dedicated one whenever anything else on that
 stack uses genesis — two facades on one wallet knock each other offline.
 
-## Locking the contract
+## Locking a 1.x contract
 
 Every Midnight contract has a **maintenance authority** - a committee of keys allowed to change its rules (e.g. swap out a circuit's verifier key). On a fresh deploy that committee is just the deployer (1-of-1), so the deployer can still alter the contract after the fact. For a trustless release you remove that power.
 
@@ -143,11 +188,11 @@ Locking installs an **empty committee at threshold 1**. No signature set can eve
 - **Locked = un-upgradeable, not disabled.** All circuits keep working; only the rules can never change. Users can rely on the code (and the solvency invariant) never shifting under them.
 - **It is a one-way door.** A locked contract can't be unlocked. To change anything, deploy a fresh instance and point `frontend/.env` at the new address.
 
-The live preview contract is locked. To iterate, deploy a fresh instance and repoint the frontend.
+The existing live Preview 1.x contract is locked. The new Stagenet 2.x deployer deliberately reports and preserves its maintenance authority instead of locking it; its deployment record must not claim immutability. To iterate on a locked v1 contract, deploy a fresh instance and repoint the frontend.
 
 ## Verifying the deployment
 
-Anyone can check, without trusting us, that (1) the deployed contract is exactly the code in this repo and (2) it can never be changed. Both checks are read-only - no wallet or seed needed.
+The steps below verify the existing 1.x deployments against `src/managed` and, where locked, prove their maintenance authority cannot change them. Both checks are read-only - no wallet or seed needed. The Stagenet 2.x verifier is the separate `verify:deployment:v2` command above and reports its intentionally unlocked authority.
 
 ### 1. Reproduce the compiled artifacts byte-for-byte
 
@@ -240,18 +285,25 @@ Unit tests run every circuit against an in-memory context, including security an
 
 | Job | What it guards |
 | --- | --- |
-| **Unit tests** | Every circuit against the in-memory simulator, plus a repo-wide typecheck. Seconds. |
-| **Frontend** | `tsc --noEmit` and a real `vite build`. Installs **both** the root and frontend dependency trees on purpose — the compiled contract is imported from outside the frontend package root, so that is the only way the `resolve.dedupe` protection against duplicate WASM instances is actually exercised rather than bypassed. |
-| **Byte-exact rebuild** | Deletes `src/managed/`, recompiles `src/shielded-night.compact` into the empty tree, and asserts the result is identical to what was committed. Deliberately uncached, and deliberately deleting first — either shortcut would let the job compare the artifacts against themselves and pass without verifying anything. This is what backs the verifiability claim above. ~15s. |
+| **Unit tests** | Runs the v1 simulator and repo typecheck with Compact 0.31.1, plus the isolated v2 simulator and typecheck after a Compact 0.34.0 fast compile. |
+| **Frontend** | Installs the root, frontend, v1 browser protocol, and v2 browser protocol lockfiles before `tsc --noEmit` and a real `vite build`. This reproduces the physical package layout used to keep the two WASM/runtime generations isolated. |
+| **Byte-exact rebuilds** | Independent jobs delete and rebuild `src/managed/` with Compact 0.31.1 and `contracts/v2/managed/` with Compact 0.34.0, then assert each tree is byte-identical to the committed artifacts. Compiling into empty trees prevents either check from passing against untouched outputs. |
 | **Integration tests** | Full docker stack: node + indexer + proof server. |
 
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and ships it to Cloudflare Pages. It is **`workflow_dispatch` only** — nothing deploys on a merge. The `branch` input picks the target: `main` is the production URL, anything else (default `preview`) gets a throwaway preview URL. The run summary records the contract addresses baked into the bundle.
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and uploads `frontend/dist` to the existing Cloudflare Pages project. A successful push-triggered CI run for the repository's current `main` commit automatically publishes that exact commit to `shielded-night.pages.dev`. Failed CI, pull-request CI, fork-originated runs, and CI for a commit that is no longer current `main` cannot publish. Production runs share a serialized concurrency lane and recheck `main` after waiting, so a late older CI completion cannot cancel or overwrite a newer release.
+
+The workflow also retains manual dispatch. Select the source ref in GitHub's **Run workflow** control, then set `branch`:
+
+- `preview` (the default), or another valid branch name, builds that selected ref and creates a Cloudflare preview deployment.
+- `main` publishes production only when the selected source is the current `main` commit and that exact SHA already has successful push-triggered CI. This validation prevents a manual run from bypassing CI.
+
+The run summary records the source SHA, Pages branch, and public contract addresses baked into the bundle. GitHub documents why privileged [`workflow_run` jobs must not run untrusted source](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run); the workflow therefore checks the triggering repository, event, branch, conclusion and SHA before checkout. Cloudflare documents this prebuilt-asset flow as [Pages Direct Upload with continuous integration](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
 
 It needs two repository secrets:
 
 | Secret | Where to get it |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens, using the **Edit Cloudflare Workers** template (Pages deploys use the same permission). |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens, scoped to the correct account with **Cloudflare Pages: Edit**. Store only the token value, without the `Bearer` prefix. |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages, in the right-hand sidebar. |
 
-Each `branch` value maps to a GitHub environment (`production` / `preview`), so production deploys can be put behind required reviewers in the repo's environment settings.
+Store both as GitHub Actions secrets available to this public repository. Each target maps to a GitHub environment (`production` / `preview`); environment protection rules can add approval gates independently of the source and CI checks above.

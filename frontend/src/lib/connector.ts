@@ -6,7 +6,7 @@ import type { ConnectedAPI, InitialAPI } from '@midnight-ntwrk/dapp-connector-ap
  * duck-type it to ignore anything that doesn't implement the connector shape.
  */
 export function findInitialAPIs(): InitialAPI[] {
-  const midnight = window.midnight;
+  const midnight = (window as Window & { midnight?: Record<string, unknown> }).midnight;
   if (!midnight) return [];
   const apis: InitialAPI[] = [];
   for (const key of Object.keys(midnight)) {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ShieldedNightState } from '../hooks/useShieldedNight';
 import { errMsg } from '../hooks/useShieldedNight';
 import { formatAmount, parseAmount } from '../lib/tokens';
-import { type Direction, runConvertToShielded, runConvertToUnshielded, type SwapStep } from '../lib/swap';
+import type { Direction, SwapStep } from '../../protocols/shared/types';
 
 const TOKENS = {
   toShielded: { from: 'NIGHT', to: 'sNight' },
@@ -18,7 +18,12 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
   const [localErr, setLocalErr] = useState<string>();
 
   const { from, to } = TOKENS[direction];
-  const ready = sn.connected && !!sn.contractAddress;
+  const trackedCoins = sn.balances?.trackedWrapperCoins ?? [];
+  const blockedCoins = sn.balances?.blockedWrapperCoins ?? [];
+  const ready = sn.connected
+    && !!sn.contractAddress
+    && !sn.configurationError
+    && (direction === 'toShielded' || trackedCoins.length > 0);
 
   const flip = () => {
     setDirection((d) => (d === 'toShielded' ? 'toUnshielded' : 'toShielded'));
@@ -27,7 +32,9 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
 
   // Max = the wallet's balance in the "from" token: NIGHT for forward, sNight
   // for reverse (the wallet funds the conversion + change during balancing).
-  const maxBase = direction === 'toShielded' ? (sn.balances?.nativeNight ?? 0n) : (sn.balances?.wrapper ?? 0n);
+  const maxBase = direction === 'toShielded'
+    ? (sn.balances?.nativeNight ?? 0n)
+    : trackedCoins.reduce((largest, coin) => coin.value > largest ? coin.value : largest, 0n);
   const onMax = () => {
     setLocalErr(undefined);
     setAmount(formatAmount(maxBase));
@@ -35,7 +42,7 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
 
   async function onSwap() {
     setLocalErr(undefined);
-    if (!sn.providers || !sn.contractAddress) return;
+    if (!sn.session || !sn.contractAddress) return;
     let amt: bigint;
     try {
       amt = parseAmount(amount);
@@ -55,29 +62,7 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
         },
         onLog: sn.appendLog,
       };
-      if (direction === 'toShielded') {
-        await runConvertToShielded(
-          {
-            providers: sn.providers,
-            contractAddress: sn.contractAddress,
-            amount: amt,
-            coinPublicKey: sn.coinPublicKey!,
-          },
-          cb,
-        );
-      } else {
-        await runConvertToUnshielded(
-          {
-            providers: sn.providers,
-            contractAddress: sn.contractAddress,
-            amount: amt,
-            unshieldedAddress: sn.unshieldedAddress!,
-            wrapperColorHex: sn.wrapperColorHex!,
-          },
-          cb,
-        );
-      }
-      await sn.refreshBalances();
+      await sn.convert(direction, amt, cb);
       setAmount('');
     } catch (e) {
       setLocalErr(errMsg(e));
@@ -133,10 +118,18 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       </div>
 
       {direction === 'toUnshielded' && (
-        <p className="small muted" style={{ marginBottom: 0 }}>
-          Converts sNight back to NIGHT; the wallet selects coins and makes change. Available:{' '}
-          <b>{formatAmount(sn.balances?.wrapper ?? 0n)}</b> sNight.
-        </p>
+        <>
+          <p className="small muted" style={{ marginBottom: 0 }}>
+            Reverse conversion spends one exact coin retained by this browser. Wallet total:{' '}
+            <b>{formatAmount(sn.balances?.wrapper ?? 0n)}</b> sNight. Tracked coin amounts:{' '}
+            <b>{trackedCoins.length ? trackedCoins.map((coin) => formatAmount(coin.value)).join(', ') : 'none'}</b>.
+          </p>
+          {blockedCoins.length > 0 && (
+            <p className="small warn" style={{ marginBottom: 0 }}>
+              {blockedCoins.map((coin) => `${formatAmount(coin.value)} sNight ${coin.status}${coin.transactionId ? ` (tx ${coin.transactionId}, ${coin.networkId ?? sn.networkKey})` : ' (no transaction id recorded)'}`).join('; ')}. Do not retry these coins until the transaction is checked.
+            </p>
+          )}
+        </>
       )}
 
       {step && (
@@ -148,13 +141,19 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       {localErr && <p className="err small">{localErr}</p>}
 
       <div className="spacer" />
-      <button className="btn btn-primary btn-block" disabled={!ready || busy} onClick={onSwap}>
+      <button className="btn btn-primary btn-block" disabled={!ready || busy || sn.operationPending} onClick={onSwap}>
         {busy ? 'Converting…' : `Swap ${from} → ${to}`}
       </button>
       {!ready && (
         <p className="small muted" style={{ marginBottom: 0 }}>
-          {sn.connected
-            ? `No contract address configured for ${sn.networkKey}. Set ${sn.networkKey.toUpperCase()}_ADDRESS in .env.`
+          {sn.configurationError
+            ? sn.configurationError
+            : direction === 'toUnshielded' && sn.connected && trackedCoins.length === 0 && blockedCoins.length > 0
+              ? 'A retained sNight coin has a pending or uncertain outcome. Check its transaction status before retrying.'
+              : direction === 'toUnshielded' && sn.connected && trackedCoins.length === 0
+              ? 'No exact sNight coin is retained by this browser; received or previously untracked coins cannot be reversed with the current wallet API.'
+            : sn.connected
+              ? `Reconnect the wallet to ${sn.networkKey}.`
             : 'Connect a wallet to swap.'}
         </p>
       )}
