@@ -1,15 +1,20 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
-import { afterEach, describe, expect, test } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  assertMaintenanceAuthorityKey,
   createWalletLogger,
   mergeVerificationRecord,
   preflightRecordOutput,
+  prepareMaintenanceSigningKey,
   reportConfirmedDeployment,
   sourceCommit,
   type Verification,
+  withDurableMaintenanceKey,
 } from '../scripts/profile.js';
 
 const ADDRESS = 'a'.repeat(64);
@@ -17,17 +22,26 @@ const verification: Verification = {
   address: ADDRESS,
   verifierKeys: { circuit: 'b'.repeat(64) },
   metadata: { name: 'Shielded Night', symbol: 'sNight', decimals: 6 },
-  authority: { locked: false, committeeSize: 1, threshold: '1', counter: '0' },
+  authority: {
+    locked: false,
+    committeeSize: 1,
+    committee: [{ tag: 'schnorr', value: 'c'.repeat(64) }],
+    threshold: '1',
+    counter: '0',
+  },
 };
 
 const originalDeployOut = process.env.DEPLOY_OUT;
 const originalSourceCommit = process.env.SHIELDED_NIGHT_COMMIT;
+const originalMaintenanceKeyFile = process.env.MN_MAINTENANCE_KEY_FILE;
 
 afterEach(() => {
   if (originalDeployOut === undefined) delete process.env.DEPLOY_OUT;
   else process.env.DEPLOY_OUT = originalDeployOut;
   if (originalSourceCommit === undefined) delete process.env.SHIELDED_NIGHT_COMMIT;
   else process.env.SHIELDED_NIGHT_COMMIT = originalSourceCommit;
+  if (originalMaintenanceKeyFile === undefined) delete process.env.MN_MAINTENANCE_KEY_FILE;
+  else process.env.MN_MAINTENANCE_KEY_FILE = originalMaintenanceKeyFile;
 });
 
 describe('deployment safety', () => {
@@ -77,6 +91,149 @@ describe('deployment safety', () => {
       writeFileSync(parentFile, 'synthetic fixture');
       process.env.DEPLOY_OUT = path.join(parentFile, 'deployment.json');
       expect(() => preflightRecordOutput()).toThrow();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('requires an explicit absolute durable maintenance-key path before deployment', () => {
+    delete process.env.MN_MAINTENANCE_KEY_FILE;
+    expect(() => prepareMaintenanceSigningKey({
+      sourceCommit: '1'.repeat(40),
+      artifactSha256: '2'.repeat(64),
+    })).toThrow('Set MN_MAINTENANCE_KEY_FILE');
+
+    process.env.MN_MAINTENANCE_KEY_FILE = 'relative-key.json';
+    expect(() => prepareMaintenanceSigningKey({
+      sourceCommit: '1'.repeat(40),
+      artifactSha256: '2'.repeat(64),
+    })).toThrow('must be an absolute path');
+  });
+
+  test('does not enter wallet startup or submission when durable key preflight fails', async () => {
+    delete process.env.MN_MAINTENANCE_KEY_FILE;
+    const walletAndSubmission = vi.fn(async () => undefined);
+    await expect(withDurableMaintenanceKey({
+      sourceCommit: '1'.repeat(40),
+      artifactSha256: '2'.repeat(64),
+    }, walletAndSubmission)).rejects.toThrow('Set MN_MAINTENANCE_KEY_FILE');
+    expect(walletAndSubmission).not.toHaveBeenCalled();
+  });
+
+  test('persists mode-0600 signing-key custody before use and restores it in a fresh process', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'shielded-night-key-'));
+    const destination = path.join(directory, 'maintenance-key.json');
+    process.env.MN_MAINTENANCE_KEY_FILE = destination;
+    try {
+      const created = prepareMaintenanceSigningKey({
+        sourceCommit: '1'.repeat(40),
+        artifactSha256: '2'.repeat(64),
+      });
+      expect(created.created).toBe(true);
+      expect(statSync(destination).mode & 0o777).toBe(0o600);
+
+      const reopened = prepareMaintenanceSigningKey({
+        sourceCommit: '3'.repeat(40),
+        artifactSha256: '4'.repeat(64),
+      });
+      expect(reopened.created).toBe(false);
+      expect(reopened.signingKey).toEqual(created.signingKey);
+      expect(reopened.verifyingKey).toEqual(created.verifyingKey);
+
+      const profileUrl = pathToFileURL(path.resolve(import.meta.dirname, '../scripts/profile.ts')).href;
+      const childScript = [
+        `const { prepareMaintenanceSigningKey } = await import(${JSON.stringify(profileUrl)});`,
+        `const key = prepareMaintenanceSigningKey({ sourceCommit: '${'5'.repeat(40)}', artifactSha256: '${'6'.repeat(64)}' });`,
+        'process.stdout.write(JSON.stringify(key.verifyingKey));',
+      ].join('\n');
+      const freshProcessPublicKey = JSON.parse(execFileSync(process.execPath, [
+        '--import', 'tsx', '--input-type=module', '-e', childScript,
+      ], {
+        cwd: path.resolve(import.meta.dirname, '..'),
+        env: { ...process.env, MN_MAINTENANCE_KEY_FILE: destination },
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }));
+      expect(freshProcessPublicKey).toEqual(created.verifyingKey);
+
+      const matchingVerification: Verification = {
+        ...verification,
+        authority: { ...verification.authority, committee: [created.verifyingKey] },
+      };
+      expect(() => assertMaintenanceAuthorityKey(matchingVerification, created.verifyingKey)).not.toThrow();
+      expect(() => assertMaintenanceAuthorityKey(verification, created.verifyingKey)).toThrow(
+        'does not match the durably persisted signing key',
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects permissive, malformed, or mismatched existing maintenance-key files', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'shielded-night-key-invalid-'));
+    const destination = path.join(directory, 'maintenance-key.json');
+    process.env.MN_MAINTENANCE_KEY_FILE = destination;
+    try {
+      prepareMaintenanceSigningKey({
+        sourceCommit: '1'.repeat(40),
+        artifactSha256: '2'.repeat(64),
+      });
+      chmodSync(destination, 0o644);
+      expect(() => prepareMaintenanceSigningKey({
+        sourceCommit: '1'.repeat(40),
+        artifactSha256: '2'.repeat(64),
+      })).toThrow('must have mode 0600');
+
+      chmodSync(destination, 0o600);
+      const validRecord = JSON.parse(readFileSync(destination, 'utf8'));
+      const fixturePrivateValue = 'feed'.repeat(16);
+      writeFileSync(destination, `${JSON.stringify({
+        ...validRecord,
+        signingKey: { ...validRecord.signingKey, value: fixturePrivateValue },
+      })}\n`, 'utf8');
+      const invalidKeyError = (() => {
+        try {
+          prepareMaintenanceSigningKey({
+            sourceCommit: '1'.repeat(40),
+            artifactSha256: '2'.repeat(64),
+          });
+        } catch (caught) {
+          return caught;
+        }
+      })();
+      expect(invalidKeyError).toBeInstanceOf(Error);
+      expect(String((invalidKeyError as Error).stack ?? (invalidKeyError as Error).message)).not.toContain(
+        fixturePrivateValue,
+      );
+
+      writeFileSync(destination, `${JSON.stringify({
+        ...validRecord,
+        verifyingKey: { ...validRecord.verifyingKey, value: '0'.repeat(64) },
+      })}\n`, 'utf8');
+      expect(() => prepareMaintenanceSigningKey({
+        sourceCommit: '1'.repeat(40),
+        artifactSha256: '2'.repeat(64),
+      })).toThrow('does not match its signing key');
+
+      const fixtureSecret = 'synthetic-secret-that-must-not-appear';
+      writeFileSync(destination, `{not-json-${fixtureSecret}}\n`, 'utf8');
+      const error = (() => {
+        try {
+          prepareMaintenanceSigningKey({
+            sourceCommit: '1'.repeat(40),
+            artifactSha256: '2'.repeat(64),
+          });
+        } catch (caught) {
+          return caught;
+        }
+      })();
+      expect(error).toBeInstanceOf(Error);
+      expect(String((error as Error).stack ?? (error as Error).message)).toContain('malformed JSON');
+      expect(String((error as Error).stack ?? (error as Error).message)).not.toContain(fixtureSecret);
+      expect(() => prepareMaintenanceSigningKey({
+        sourceCommit: '1'.repeat(40),
+        artifactSha256: '2'.repeat(64),
+      })).toThrow('malformed JSON');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

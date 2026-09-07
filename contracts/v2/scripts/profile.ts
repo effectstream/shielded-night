@@ -1,7 +1,28 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
+import {
+  sampleSigningKey,
+  signatureVerifyingKey,
+  type SignatureVerifyingKey,
+  type SigningKey,
+} from '@midnightntwrk/onchain-runtime-v4';
 import pino from 'pino';
 import { ledger } from '../managed/contract/index.js';
 
@@ -18,6 +39,181 @@ export const COMPATIBILITY = {
 
 export const REPOSITORY_ROOT = path.resolve(new URL(import.meta.url).pathname, '..', '..', '..', '..');
 export const MANAGED_DIRECTORY = path.resolve(REPOSITORY_ROOT, 'contracts', 'v2', 'managed');
+
+interface MaintenanceKeyRecord {
+  readonly schemaVersion: 1;
+  readonly recordKind: 'shielded-night-maintenance-signing-key';
+  readonly network: 'stagenet';
+  readonly signingKey: SigningKey;
+  readonly verifyingKey: SignatureVerifyingKey;
+  readonly createdAt: string;
+  readonly createdFor: {
+    readonly sourceCommit: string;
+    readonly artifactSha256: string;
+  };
+}
+
+export interface PreparedMaintenanceKey {
+  readonly path: string;
+  readonly signingKey: SigningKey;
+  readonly verifyingKey: SignatureVerifyingKey;
+  readonly created: boolean;
+}
+
+const isSignatureKind = (value: unknown): value is SigningKey['tag'] =>
+  value === 'schnorr' || value === 'ecdsa';
+
+function normalizeSigningKey(value: unknown): SigningKey {
+  if (!value || typeof value !== 'object') throw new Error('Maintenance key file has no signing key.');
+  const candidate = value as { tag?: unknown; value?: unknown };
+  if (!isSignatureKind(candidate.tag) || typeof candidate.value !== 'string' || !/^[0-9a-f]{64}$/i.test(candidate.value)) {
+    throw new Error('Maintenance key file contains an invalid signing key.');
+  }
+  return { tag: candidate.tag, value: candidate.value.toLowerCase() };
+}
+
+function normalizeVerifyingKey(value: unknown): SignatureVerifyingKey {
+  if (!value || typeof value !== 'object') throw new Error('Maintenance key file has no verifying key.');
+  const candidate = value as { tag?: unknown; value?: unknown };
+  if (!isSignatureKind(candidate.tag) || typeof candidate.value !== 'string' || !/^[0-9a-f]{64}$/i.test(candidate.value)) {
+    throw new Error('Maintenance key file contains an invalid verifying key.');
+  }
+  return { tag: candidate.tag, value: candidate.value.toLowerCase() };
+}
+
+const sameVerifyingKey = (left: SignatureVerifyingKey, right: SignatureVerifyingKey): boolean =>
+  left.tag === right.tag && left.value.toLowerCase() === right.value.toLowerCase();
+
+export function maintenanceKeyPath(): string {
+  const configured = process.env.MN_MAINTENANCE_KEY_FILE?.trim();
+  if (!configured) {
+    throw new Error('Set MN_MAINTENANCE_KEY_FILE to an explicit durable, private maintenance-key file path.');
+  }
+  if (!path.isAbsolute(configured)) {
+    throw new Error('MN_MAINTENANCE_KEY_FILE must be an absolute path on durable storage.');
+  }
+  return configured;
+}
+
+function readMaintenanceKeyRecord(destination: string): MaintenanceKeyRecord {
+  let file: number | undefined;
+  try {
+    file = openSync(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(file);
+    if (!stat.isFile()) throw new Error(`Maintenance key path is not a regular file: ${destination}`);
+    if ((stat.mode & 0o777) !== 0o600) {
+      throw new Error(`Maintenance key file must have mode 0600: ${destination}`);
+    }
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Maintenance key file must contain a JSON object.');
+    }
+    const record = parsed as Partial<MaintenanceKeyRecord>;
+    if (record.schemaVersion !== 1 || record.recordKind !== 'shielded-night-maintenance-signing-key' || record.network !== 'stagenet') {
+      throw new Error('Maintenance key file has an unsupported schema or network.');
+    }
+    if (typeof record.createdAt !== 'string' || !record.createdFor ||
+      !/^[0-9a-f]{40}$/i.test(record.createdFor.sourceCommit ?? '') ||
+      !/^[0-9a-f]{64}$/i.test(record.createdFor.artifactSha256 ?? '')) {
+      throw new Error('Maintenance key file has invalid creation provenance.');
+    }
+    const signingKey = normalizeSigningKey(record.signingKey);
+    const verifyingKey = normalizeVerifyingKey(record.verifyingKey);
+    let derived: SignatureVerifyingKey;
+    try {
+      derived = signatureVerifyingKey(signingKey);
+    } catch {
+      throw new Error('Maintenance key file contains a signing key rejected by the pinned runtime.');
+    }
+    if (!sameVerifyingKey(derived, verifyingKey)) {
+      throw new Error('Maintenance key file verifying key does not match its signing key.');
+    }
+    return {
+      schemaVersion: 1,
+      recordKind: 'shielded-night-maintenance-signing-key',
+      network: 'stagenet',
+      signingKey,
+      verifyingKey,
+      createdAt: record.createdAt,
+      createdFor: {
+        sourceCommit: record.createdFor.sourceCommit.toLowerCase(),
+        artifactSha256: record.createdFor.artifactSha256.toLowerCase(),
+      },
+    };
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('Maintenance key file contains malformed JSON.');
+    throw error;
+  } finally {
+    if (file !== undefined) closeSync(file);
+  }
+}
+
+export function prepareMaintenanceSigningKey(input: {
+  sourceCommit: string;
+  artifactSha256: string;
+}): PreparedMaintenanceKey {
+  const destination = maintenanceKeyPath();
+  if (existsSync(destination)) {
+    const existing = readMaintenanceKeyRecord(destination);
+    return { path: destination, signingKey: existing.signingKey, verifyingKey: existing.verifyingKey, created: false };
+  }
+
+  mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+  const signingKey = sampleSigningKey('schnorr');
+  const verifyingKey = signatureVerifyingKey(signingKey);
+  const record: MaintenanceKeyRecord = {
+    schemaVersion: 1,
+    recordKind: 'shielded-night-maintenance-signing-key',
+    network: 'stagenet',
+    signingKey,
+    verifyingKey,
+    createdAt: new Date().toISOString(),
+    createdFor: {
+      sourceCommit: input.sourceCommit,
+      artifactSha256: input.artifactSha256,
+    },
+  };
+  let file: number | undefined;
+  try {
+    file = openSync(
+      destination,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    fchmodSync(file, 0o600);
+    writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+    fsyncSync(file);
+  } finally {
+    if (file !== undefined) closeSync(file);
+  }
+
+  let directory: number | undefined;
+  try {
+    directory = openSync(path.dirname(destination), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    fsyncSync(directory);
+  } finally {
+    if (directory !== undefined) closeSync(directory);
+  }
+
+  // The deployer never trusts its own write. Close and reopen the durable file,
+  // enforce its permissions, and derive the public identity again before any
+  // wallet is started or transaction can be submitted.
+  const persisted = readMaintenanceKeyRecord(destination);
+  if (!sameVerifyingKey(persisted.verifyingKey, verifyingKey) ||
+    persisted.signingKey.tag !== signingKey.tag || persisted.signingKey.value !== signingKey.value) {
+    throw new Error('Maintenance signing key did not survive durable write/read-back validation.');
+  }
+  return { path: destination, signingKey: persisted.signingKey, verifyingKey: persisted.verifyingKey, created: true };
+}
+
+/** Run wallet startup/submission only after durable key creation and read-back. */
+export async function withDurableMaintenanceKey<T>(
+  input: { sourceCommit: string; artifactSha256: string },
+  action: (key: PreparedMaintenanceKey) => Promise<T>,
+): Promise<T> {
+  const key = prepareMaintenanceSigningKey(input);
+  return await action(key);
+}
 
 /**
  * testkit-js interpolates the wallet seed into an info message while building
@@ -82,7 +278,13 @@ export interface Verification {
   readonly address: string;
   readonly verifierKeys: Record<string, string>;
   readonly metadata: { name: string; symbol: string; decimals: number };
-  readonly authority: { locked: boolean; committeeSize: number; threshold: string; counter: string };
+  readonly authority: {
+    locked: boolean;
+    committeeSize: number;
+    committee: SignatureVerifyingKey[];
+    threshold: string;
+    counter: string;
+  };
 }
 
 export async function verifyAddress(
@@ -119,6 +321,7 @@ export async function verifyAddress(
   }
   const authority = state.maintenanceAuthority;
   const committeeSize = authority.committee.length;
+  const committee = authority.committee.map((key: unknown) => normalizeVerifyingKey(key));
   const threshold = BigInt(authority.threshold);
   return {
     address: normalizedAddress,
@@ -127,10 +330,21 @@ export async function verifyAddress(
     authority: {
       locked: committeeSize === 0 && threshold > 0n,
       committeeSize,
+      committee,
       threshold: threshold.toString(),
       counter: BigInt(authority.counter).toString(),
     },
   };
+}
+
+export function assertMaintenanceAuthorityKey(
+  verification: Verification,
+  expected: SignatureVerifyingKey,
+): void {
+  const { committee, threshold } = verification.authority;
+  if (committee.length !== 1 || threshold !== '1' || !sameVerifyingKey(committee[0], expected)) {
+    throw new Error('On-chain maintenance authority does not match the durably persisted signing key.');
+  }
 }
 
 export function recordPath(address: string): string {

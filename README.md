@@ -101,14 +101,30 @@ Contract deployment is a local-host operation; the GitHub workflow only builds a
 npm --prefix contracts/v2 ci
 bun run compact:v2
 
+# Required durable custody path. The deployer creates or reuses this private
+# file at mode 0600 before it starts the wallet or can submit a transaction.
+mkdir -p /private/durable/shielded-night
+chmod 700 /private/durable/shielded-night
+
 # Read WALLET_SEED from an existing private file without copying it into this repo.
+MN_MAINTENANCE_KEY_FILE=/private/durable/shielded-night/stagenet-maintenance-key.json \
 MN_WALLET_ENV_FILE=/private/path/to/wallet.env MN_ENV=stagenet bun run deploy:v2
 
 # Or use MN_MNEMONIC / MN_SEED from the gitignored root .env shown above.
+MN_MAINTENANCE_KEY_FILE=/private/durable/shielded-night/stagenet-maintenance-key.json \
 MN_ENV=stagenet bun run deploy:v2
 ```
 
-The deployer confirms the transaction, compares the on-chain circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
+`MN_MAINTENANCE_KEY_FILE` is mandatory and must be an absolute path on durable storage. The file contains the maintenance signing key, so back it up securely and never print or commit it. A repeat invocation reads the existing file, enforces mode 0600, re-derives its public key and reuses that exact key. When the deployer runs inside a temporary Docker container, bind-mount the host directory and point the variable at the mounted path; a path inside an ephemeral container or volume is not durable:
+
+```bash
+docker run --rm \
+  --mount type=bind,src=/private/durable/shielded-night,dst=/run/shielded-night-private \
+  -e MN_MAINTENANCE_KEY_FILE=/run/shielded-night-private/stagenet-maintenance-key.json \
+  your-deployment-image bun run deploy:v2
+```
+
+The deployer closes and read-back validates the key file before wallet startup, passes that exact key to Midnight.js, and verifies that its derived public key is the 1-of-1 on-chain maintenance authority. It then confirms the transaction, compares the circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
 
 ```bash
 MN_ENV=stagenet CV_ADDRESS=<deployed-address> bun run verify:deployment:v2
