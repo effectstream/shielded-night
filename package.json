@@ -11,6 +11,12 @@
   "scripts": {
     "compact": "compact compile +0.31.1 src/shielded-night.compact src/managed/",
     "compact:fast": "compact compile +0.31.1 --skip-zk src/shielded-night.compact src/managed/",
+    "compact:v2": "compact compile +0.34.0 contracts/v2/shielded-night.compact contracts/v2/managed/",
+    "compact:v2:fast": "compact compile +0.34.0 --skip-zk contracts/v2/shielded-night.compact contracts/v2/managed/",
+    "typecheck:v2": "npm --prefix contracts/v2 run typecheck",
+    "test:v2": "npm --prefix contracts/v2 run test:unit",
+    "deploy:v2": "npm --prefix contracts/v2 run deploy",
+    "verify:deployment:v2": "npm --prefix contracts/v2 run verify:deployment",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun run test:unit && bun run test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",

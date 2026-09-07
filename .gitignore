@@ -17,3 +17,4 @@ midnight-level-db*/
 .claude/
 .wrangler/
 .debug-tx.hex
+.local/
