@@ -13,6 +13,6 @@
 //
 // Per network, an injected address wins over the one baked in at build time
 // from frontend/.env; a blank or absent value falls through to the build-time
-// value. Keys: PREVIEW_ADDRESS, PREPROD_ADDRESS, MAINNET_ADDRESS,
+// value. Keys: PREVIEW_ADDRESS, PREPROD_ADDRESS, STAGENET_ADDRESS,
 // UNDEPLOYED_ADDRESS. See src/lib/runtime-config.ts.
 window.SHIELDED_NIGHT = window.SHIELDED_NIGHT || {};

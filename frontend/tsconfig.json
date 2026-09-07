@@ -16,5 +16,12 @@
     "allowImportingTsExtensions": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "vite.config.ts", "../src/managed/contract/index.d.ts"]
+  "include": [
+    "src",
+    "protocols/*/src",
+    "protocols/shared",
+    "vite.config.ts",
+    "../src/managed/contract/index.d.ts",
+    "../contracts/v2/managed/contract/index.d.ts"
+  ]
 }

@@ -55,10 +55,12 @@ export function WalletBar({ sn }: { sn: ShieldedNightState }) {
           <div style={{ position: 'relative' }}>
             <button
               className="btn btn-primary"
-              disabled={sn.connecting || sn.detecting || sn.availableAPIs.length === 0}
+              disabled={sn.connecting || sn.detecting || sn.availableAPIs.length === 0 || !!sn.configurationError}
               onClick={onConnectClick}
             >
-              {sn.connecting
+              {sn.configurationError
+                ? 'Unavailable'
+                : sn.connecting
                 ? 'Connecting…'
                 : sn.detecting
                   ? 'Detecting…'

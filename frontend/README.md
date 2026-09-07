@@ -1,126 +1,83 @@
-# ShieldedNight Frontend — NIGHT ⇄ sNight DEX
+# Shielded NIGHT frontend
 
-A browser dApp for the ShieldedNight contract: convert native unshielded **NIGHT**
-into the shielded wrapper **sNight** and back. Connects to any `window.midnight[*]`
-wallet, reads shielded + unshielded balances, and targets preview / preprod
-(mainnet later) via a network dropdown.
-
-Vite + React 18 + TypeScript. Adapted from the `midnight-wallet-dapp` reference.
+A Vite, React and TypeScript dApp for converting unshielded NIGHT to shielded sNight and back. The public selector supports Preview and Preprod on Midnight 1.x plus Stagenet on Midnight 2.x.
 
 ## Setup
 
+Install the app and both isolated protocol trees from the repository root:
+
 ```bash
-cd frontend
-bun install
-bun run dev               # http://localhost:5173
+bun install --frozen-lockfile
+bun --cwd frontend install --frozen-lockfile
+npm --prefix frontend/protocols/v1 ci
+npm --prefix frontend/protocols/v2 ci
+bun --cwd frontend run dev
 ```
 
-Requires the contract's compiled artifacts at `../src/managed` (run `bun run compact`
-in the repo root if missing). Vite serves them at `/contract/compiled/shielded-night`
-so the browser proof step can fetch prover/verifier keys.
+The development server listens on `http://localhost:5173`. The repository must contain the full v1 artifacts in `src/managed` and v2 artifacts in `contracts/v2/managed`.
 
-## Configuration (`.env`)
+## Network configuration
 
-| Var | Purpose |
-| --- | --- |
-| `PREVIEW_ADDRESS` / `PREPROD_ADDRESS` / `MAINNET_ADDRESS` / `UNDEPLOYED_ADDRESS` | Deployed contract address per network (the dropdown shows only networks with an address set). |
+`frontend/.env` contains only public contract addresses and is committed:
 
-The wallet supplies the indexer / node / proof-server URLs (`getConfiguration()`)
-and owns proving; the dApp only needs the contract address per network. The
-sNight token type is derived from the address.
+| Variable | Selector | Protocol |
+| --- | --- | --- |
+| `PREVIEW_ADDRESS` | Preview | Midnight 1.x |
+| `PREPROD_ADDRESS` | Preprod | Midnight 1.x |
+| `STAGENET_ADDRESS` | Stagenet | Midnight 2.x |
+| `UNDEPLOYED_ADDRESS` | Local (development only) | Midnight 1.x |
 
-**`.env` is committed.** It holds only public on-chain addresses, so the
-deployed address per network lives in git history (each redeploy is a commit).
-Secrets never go in it - deploy scripts read `MN_MNEMONIC` / `MN_SEED` from the
-shell environment. For personal overrides use `.env.local` (gitignored; Vite
-loads it over `.env`).
+Preview, Preprod and Stagenet always appear. A missing or malformed address displays an unavailable state and blocks wallet connection and transactions. Local appears in development or when its address is explicitly configured.
 
-### Runtime address override (`window.SHIELDED_NIGHT`)
+The wallet supplies its network, indexer and proving capabilities. The app verifies the wallet network throughout the operation and delegates proving, transaction balancing and submission to the wallet. It submits the exact balanced bytes returned by the wallet.
 
-`.env` bakes the addresses in at BUILD time, which is right for the hosted
-networks and wrong for a deployment that brings up its own chain: an image built
-once and run against many throwaway local devnets only learns the contract
-address when the container starts. So `index.html` loads `/config.js` as a
-classic script — it therefore runs BEFORE the deferred module bundle — and
-[public/config.js](public/config.js) ships a **no-op placeholder**, so every
-deployment serves a real file (never a 404, never an HTML fallback the browser
-refuses to execute):
+### Runtime address override
+
+`index.html` loads `public/config.js` before the module bundle. A stack may replace its no-op value at container startup:
 
 ```js
-// public/config.js → dist/config.js, as built
-window.SHIELDED_NIGHT = window.SHIELDED_NIGHT || {};
+window.SHIELDED_NIGHT = {
+  UNDEPLOYED_ADDRESS: "0123…",
+};
 ```
 
-A stack-hosted deployment overwrites that one file at container start, and needs
-to touch nothing else in the build:
+The supported keys are `PREVIEW_ADDRESS`, `PREPROD_ADDRESS`, `STAGENET_ADDRESS` and `UNDEPLOYED_ADDRESS`. A non-blank runtime value wins over its build-time value. Only public addresses are injectable; secrets remain outside the frontend.
 
-```js
-// dist/config.js, written from the deploy record before nginx starts
-window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "0123…" };
-```
+## Protocol isolation
 
-Per network, the injected value wins over the build-time one; a blank or absent
-value falls through to `.env`, so **a build with no global behaves exactly as
-before**. The keys are the same names as the env vars: `PREVIEW_ADDRESS`,
-`PREPROD_ADDRESS`, `MAINNET_ADDRESS`, `UNDEPLOYED_ADDRESS`. The dropdown follows
-suit — inject `UNDEPLOYED_ADDRESS` and "Local (undeployed)" appears in a bundle
-built without one.
+The two ledger generations use incompatible runtime and WASM class identities. `protocols/v1` and `protocols/v2` therefore have independent package manifests, lockfiles and adapters. The UI talks to their shared protocol-neutral session interface and lazy-loads only the adapter selected for the wallet connection.
 
-Only ADDRESSES are injectable. The wallet still supplies the indexer / node /
-proof-server URLs (`getConfiguration()`), so a stack on non-default ports needs
-no URL lane in the page — one reason there is nothing else to get wrong.
+The production build contains four distinct runtime assets: v1 and v2 ledger WASM plus v1 and v2 on-chain runtime WASM. Vite also copies the complete proving trees to:
 
-Packaging note: the literal `SHIELDED_NIGHT` is a property name on `window`, so
-it survives minification and appears verbatim in the built bundle. An image that
-injects `/config.js` can prove the lane is present in the build it ships instead
-of trusting it:
+- `/contract/v1/shielded-night`
+- `/contract/v2/shielded-night`
+- `/contract/compiled/shielded-night` (legacy v1 URL for already-open clients)
+
+The sNight token identity is derived inside the selected adapter with that generation's ledger package.
+
+## Conversion and switching behavior
+
+Each normal conversion calls an atomic circuit and uses one wallet approval:
+
+- NIGHT → sNight: `convertToShielded`
+- sNight → NIGHT: `convertToUnshielded`
+
+Changing the selector disposes the old protocol session, clears balances and operation state, and requires a new wallet connection. Generation guards ignore late callbacks from the old network. Wallet network checks before and after balancing and immediately before submission prevent an old session from submitting on the newly selected network. If submission has already started, any uncertain error retains the original transaction id and network association.
+
+The unfinished-swaps panel remains able to resume deposits created by the older two-step UI. Recovery uses the selected protocol adapter and refuses records belonging to another contract.
+
+### Reverse coin limitation
+
+The connector exposes shielded balances by token and amount, without the nonce of each owned coin. `convertToUnshielded` must receive that exact nonce, color and value, so the frontend persists the deterministic coin candidate before forward wallet interaction and makes it spendable only after the contract returns the same coin. Reverse conversion therefore spends one whole coin minted and retained by this browser. Valid records from the older v1 two-step UI migrate into the scoped v1 store.
+
+An uncertain forward or reverse submission keeps the coin record quarantined with its transaction id and network; it is not offered again automatically. A known pre-submission failure or wallet cancellation removes a pending forward candidate. sNight received from another wallet, previously minted by the atomic UI that discarded its result, or cleared from browser storage cannot be reversed until the wallet connector exposes coin-level details.
+
+## Validation
 
 ```bash
-grep -q SHIELDED_NIGHT dist/assets/*.js   # fail the build if the override is gone
+bun --cwd frontend run typecheck
+bun --cwd frontend run build
+bun run test:unit -- test/unit/frontend-wallet-boundary.unit.test.ts test/unit/runtime-config.unit.test.ts
 ```
 
-See [src/lib/runtime-config.ts](src/lib/runtime-config.ts); the behaviour is
-pinned by `test/unit/runtime-config.unit.test.ts` in the repo root's unit tier.
-
-## How it works
-
-Each conversion is **two transactions** with a pool credit keyed by a
-client-generated secret held between them. One **Swap** click orchestrates both
-legs (two wallet approvals) with a step indicator:
-
-- **NIGHT → sNight**: `depositUnshielded(secret, amount)` → `withdrawShielded(secret, amount, myCoinPublicKey, nonce)`.
-- **sNight → NIGHT**: `depositShielded(secret, coin)` → `withdrawUnshielded(secret, coin.value, myAddress)`.
-
-The secret and any minted wrapper coin are persisted to `localStorage`, so an
-interrupted swap can be resumed (see the "Unfinished swaps" panel) and minted
-sNight can be converted back later.
-
-### Reverse-direction limitation (read this)
-
-The `window.midnight` connector exposes only **aggregate** shielded balances — it
-does not reveal individual coins or their nonces. `depositShielded` needs the
-exact `ShieldedCoinInfo{nonce, color, value}`. So **sNight → NIGHT works only for
-wrapper coins this dApp minted in this browser** (tracked in `localStorage`). The
-reverse UI is enabled regardless; if there is no tracked coin it surfaces a clear
-error rather than failing silently. Converting arbitrary/received sNight would
-require a coin-level wallet API that does not exist today. The reverse swap
-converts a whole tracked coin at a time (remainder-free).
-
-## Verify end-to-end (needs a deployed contract + a Midnight wallet)
-
-1. `bun run dev`; install a Midnight wallet extension set to **preview**.
-2. Put the preview contract address in `.env`, reload.
-3. Click **Connect wallet** (top-right) → approve. Balances panel shows NIGHT + sNight.
-4. Enter an amount, **Swap NIGHT → sNight**, approve both prompts → sNight balance rises.
-5. Flip direction, **Swap sNight → NIGHT** (converts a dApp-minted coin) → NIGHT rises.
-
-## Build
-
-```bash
-bun run typecheck   # tsc --noEmit
-bun run build       # vite build → dist/
-```
-
-The build bundles the ledger/runtime WASM and copies the contract artifacts. The
-ledger WASM is ~10 MB and prover keys are multi-MB — expect a large first load,
-cached by the browser afterward.
+CI additionally installs both protocol lockfiles on Linux, rebuilds both contract artifact trees with their pinned Compact compilers, checks byte-exact output and runs the Docker integration suite.

@@ -1,5 +1,4 @@
 import { useShieldedNight } from './hooks/useShieldedNight';
-import { trackedWrapperTotal } from './lib/swap';
 import { explorerContractUrl } from './lib/networks';
 import { WalletBar } from './components/WalletBar';
 import { BalancePanel } from './components/BalancePanel';
@@ -26,13 +25,13 @@ export default function App() {
         <BalancePanel
           balances={sn.balances}
           onRefresh={() => void sn.refreshBalances()}
-          mintedTotal={sn.contractAddress ? trackedWrapperTotal(sn.contractAddress) : 0n}
+          mintedTotal={sn.balances?.trackedWrapperCoins.reduce((total, coin) => total + coin.value, 0n) ?? 0n}
         />
       )}
 
-      <SwapCard sn={sn} />
+      <SwapCard key={sn.networkKey} sn={sn} />
 
-      <PendingSwaps sn={sn} />
+      <PendingSwaps key={`pending-${sn.networkKey}`} sn={sn} />
 
       <ActivityLog logs={sn.logs} />
 

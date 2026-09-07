@@ -2,7 +2,7 @@
 
 Convert native **unshielded NIGHT** into **shielded sNight** (a contract-minted wrapper token) and back, on Midnight.
 
-Live (preview): https://shielded-night.pages.dev
+Live (Preview / Preprod / Stagenet selector): https://shielded-night.pages.dev
 
 ## What this is
 
@@ -66,12 +66,14 @@ Locked NIGHT backs the wrapper 1:1 across both models - the invariant `locked NI
 The frontend is a Vite + React app that connects to any `window.midnight` wallet (e.g. Lace), reads your NIGHT/sNight balances, and runs the atomic one-transaction swaps (one wallet approval each way). Proving is delegated to the wallet.
 
 ```bash
-cd frontend
-bun install
-bun run dev              # http://localhost:5173  (uses the committed .env)
+bun install --frozen-lockfile
+bun --cwd frontend install --frozen-lockfile
+npm --prefix frontend/protocols/v1 ci
+npm --prefix frontend/protocols/v2 ci
+bun --cwd frontend run dev   # http://localhost:5173 (uses the committed .env)
 ```
 
-Needs a Midnight wallet extension and the compiled artifacts in `src/managed/` (run `bun run compact` at the repo root if missing). Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
+Needs a Midnight wallet extension, the v1 artifacts in `src/managed/`, and the v2 artifacts in `contracts/v2/managed/`. The two protocol installs remain separate because their ledger/runtime WASM generations cannot share class identities. Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
 
 Deploy a contract (needs a funded, DUST-registered wallet). Put the deployer
 credentials in the repo-root `.env` (gitignored - template in
@@ -145,7 +147,7 @@ On `undeployed` the deployer seed defaults to the genesis seed
 (`…0001`). Set `MN_SEED` to a dedicated one whenever anything else on that
 stack uses genesis — two facades on one wallet knock each other offline.
 
-## Locking the contract
+## Locking a 1.x contract
 
 Every Midnight contract has a **maintenance authority** - a committee of keys allowed to change its rules (e.g. swap out a circuit's verifier key). On a fresh deploy that committee is just the deployer (1-of-1), so the deployer can still alter the contract after the fact. For a trustless release you remove that power.
 
@@ -166,11 +168,11 @@ Locking installs an **empty committee at threshold 1**. No signature set can eve
 - **Locked = un-upgradeable, not disabled.** All circuits keep working; only the rules can never change. Users can rely on the code (and the solvency invariant) never shifting under them.
 - **It is a one-way door.** A locked contract can't be unlocked. To change anything, deploy a fresh instance and point `frontend/.env` at the new address.
 
-The live preview contract is locked. To iterate, deploy a fresh instance and repoint the frontend.
+The existing live Preview 1.x contract is locked. The new Stagenet 2.x deployer deliberately reports and preserves its maintenance authority instead of locking it; its deployment record must not claim immutability. To iterate on a locked v1 contract, deploy a fresh instance and repoint the frontend.
 
 ## Verifying the deployment
 
-Anyone can check, without trusting us, that (1) the deployed contract is exactly the code in this repo and (2) it can never be changed. Both checks are read-only - no wallet or seed needed.
+The steps below verify the existing 1.x deployments against `src/managed` and, where locked, prove their maintenance authority cannot change them. Both checks are read-only - no wallet or seed needed. The Stagenet 2.x verifier is the separate `verify:deployment:v2` command above and reports its intentionally unlocked authority.
 
 ### 1. Reproduce the compiled artifacts byte-for-byte
 

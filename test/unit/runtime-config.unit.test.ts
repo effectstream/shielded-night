@@ -72,8 +72,8 @@ describe('runtime contract-address override', () => {
   });
 
   it('returns undefined when neither source has a value (network stays out of the dropdown)', () => {
-    expect(resolveContractAddress('MAINNET_ADDRESS', undefined, undefined)).toBeUndefined();
-    expect(resolveContractAddress('MAINNET_ADDRESS', '', host({}))).toBeUndefined();
+    expect(resolveContractAddress('STAGENET_ADDRESS', undefined, undefined)).toBeUndefined();
+    expect(resolveContractAddress('STAGENET_ADDRESS', '', host({}))).toBeUndefined();
   });
 
   it('reads the global off `window` when no host is passed (the browser lane)', () => {

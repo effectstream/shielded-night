@@ -8,26 +8,28 @@
  * the bundle was built. The wrapper (sNight) token type is always derived from
  * the address.
  */
-import { resolveContractAddress, type ContractAddressVar } from './runtime-config';
+/// <reference types="vite/client" />
+import { resolveContractAddress, type ContractAddressVar } from './runtime-config.js';
 
 export interface NetworkOption {
-  key: 'preview' | 'preprod' | 'mainnet' | 'undeployed';
+  key: 'preview' | 'preprod' | 'stagenet' | 'undeployed';
   label: string;
   networkId: string;
+  protocolFamily: 'midnight-1.x' | 'midnight-2.x';
 }
 
 export const NETWORKS: NetworkOption[] = [
-  { key: 'preview', label: 'Preview', networkId: 'preview' },
-  { key: 'preprod', label: 'PreProd', networkId: 'preprod' },
-  { key: 'mainnet', label: 'Mainnet', networkId: 'mainnet' },
-  { key: 'undeployed', label: 'Local (undeployed)', networkId: 'undeployed' },
+  { key: 'preview', label: 'Preview', networkId: 'preview', protocolFamily: 'midnight-1.x' },
+  { key: 'preprod', label: 'Preprod', networkId: 'preprod', protocolFamily: 'midnight-1.x' },
+  { key: 'stagenet', label: 'Stagenet', networkId: 'stagenet', protocolFamily: 'midnight-2.x' },
+  { key: 'undeployed', label: 'Local (undeployed)', networkId: 'undeployed', protocolFamily: 'midnight-1.x' },
 ];
 
 /** The env var (and runtime-config key) holding each network's contract address. */
 const ADDRESS_VAR: Record<NetworkOption['key'], ContractAddressVar> = {
   preview: 'PREVIEW_ADDRESS',
   preprod: 'PREPROD_ADDRESS',
-  mainnet: 'MAINNET_ADDRESS',
+  stagenet: 'STAGENET_ADDRESS',
   undeployed: 'UNDEPLOYED_ADDRESS',
 };
 
@@ -35,7 +37,7 @@ const ADDRESS_VAR: Record<NetworkOption['key'], ContractAddressVar> = {
 const BUILD_TIME_ADDRESSES: Record<NetworkOption['key'], string | undefined> = {
   preview: import.meta.env.PREVIEW_ADDRESS,
   preprod: import.meta.env.PREPROD_ADDRESS,
-  mainnet: import.meta.env.MAINNET_ADDRESS,
+  stagenet: import.meta.env.STAGENET_ADDRESS,
   undeployed: import.meta.env.UNDEPLOYED_ADDRESS,
 };
 
@@ -44,14 +46,26 @@ const BUILD_TIME_ADDRESSES: Record<NetworkOption['key'], string | undefined> = {
  * deployment injected one, else the build-time env var. Resolved per CALL (not
  * once at module load) so an injected config is picked up whenever it lands.
  */
-export const contractAddressFor = (key: NetworkOption['key']): string | undefined =>
+export const rawContractAddressFor = (key: NetworkOption['key']): string | undefined =>
   resolveContractAddress(ADDRESS_VAR[key], BUILD_TIME_ADDRESSES[key]);
+
+export const contractAddressFor = (key: NetworkOption['key']): string | undefined => {
+  const address = rawContractAddressFor(key)?.replace(/^0x/i, '').toLowerCase();
+  return address && /^[0-9a-f]{64}$/.test(address) ? address : undefined;
+};
+
+export const contractConfigurationError = (key: NetworkOption['key']): string | undefined => {
+  const raw = rawContractAddressFor(key);
+  if (!raw) return `Shielded NIGHT is not deployed on ${NETWORKS.find((item) => item.key === key)?.label ?? key}.`;
+  if (!contractAddressFor(key)) return `${ADDRESS_VAR[key]} must be exactly 32 bytes of hexadecimal.`;
+  return undefined;
+};
 
 /** Midnight explorer base per network (only where known; undeployed has none). */
 const EXPLORER_BASE: Record<NetworkOption['key'], string | undefined> = {
   preview: 'https://preview.midnightexplorer.com',
   preprod: undefined,
-  mainnet: undefined,
+  stagenet: undefined,
   undeployed: undefined,
 };
 
@@ -62,14 +76,14 @@ export const explorerContractUrl = (key: NetworkOption['key'], address: string):
 };
 
 /**
- * Networks that actually have a deployed contract configured. The dropdown
- * shows only these, so unconfigured networks (e.g. preprod, mainnet) appear
- * the moment their <NETWORK>_ADDRESS env var is set - no code change needed.
- * The same holds for a runtime-injected address: a stack that deploys its own
- * contract and injects `window.SHIELDED_NIGHT.UNDEPLOYED_ADDRESS` makes "Local
- * (undeployed)" appear in a bundle built with an empty UNDEPLOYED_ADDRESS.
+ * The three public choices stay visible even when a deployment address is
+ * missing, so the UI can explain that state. Local remains development-only
+ * unless runtime configuration supplies its contract address.
  */
 export const configuredNetworks = (): NetworkOption[] => {
-  const live = NETWORKS.filter((n) => contractAddressFor(n.key) !== undefined);
-  return live.length > 0 ? live : NETWORKS.filter((n) => n.key === 'preview');
+  const publicNetworks = NETWORKS.filter((network) => network.key !== 'undeployed');
+  const local = NETWORKS.find((network) => network.key === 'undeployed')!;
+  return contractAddressFor('undeployed') || import.meta.env.DEV
+    ? [...publicNetworks, local]
+    : publicNetworks;
 };
