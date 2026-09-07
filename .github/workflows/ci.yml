@@ -107,8 +107,16 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: frontend
 
+      - name: Install v1 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v1
+
+      - name: Install v2 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v2
+
       # No compact compile: src/managed is committed, and vite copies it into
-      # dist/contract/compiled for FetchZkConfigProvider.
+      # the matching v1/v2 output trees for FetchZkConfigProvider.
       - name: Typecheck
         run: bun run typecheck
         working-directory: frontend

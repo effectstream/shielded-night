@@ -136,14 +136,22 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      # Both installs reproduce the physical dependency layout whose distinct
-      # WASM/runtime generations the frontend build must keep isolated.
+      # All four installs reproduce the physical dependency layout whose
+      # distinct WASM/runtime generations the frontend build keeps isolated.
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
         working-directory: frontend
+
+      - name: Install v1 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v1
+
+      - name: Install v2 browser protocol dependencies
+        run: npm ci
+        working-directory: frontend/protocols/v2
 
       - name: Typecheck
         run: bun run typecheck

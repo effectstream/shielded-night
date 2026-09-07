@@ -263,9 +263,9 @@ Unit tests run every circuit against an in-memory context, including security an
 
 | Job | What it guards |
 | --- | --- |
-| **Unit tests** | Every circuit against the in-memory simulator, plus a repo-wide typecheck. Seconds. |
-| **Frontend** | `tsc --noEmit` and a real `vite build`. Installs **both** the root and frontend dependency trees on purpose — the compiled contract is imported from outside the frontend package root, so that is the only way the `resolve.dedupe` protection against duplicate WASM instances is actually exercised rather than bypassed. |
-| **Byte-exact rebuild** | Deletes `src/managed/`, recompiles `src/shielded-night.compact` into the empty tree, and asserts the result is identical to what was committed. Deliberately uncached, and deliberately deleting first — either shortcut would let the job compare the artifacts against themselves and pass without verifying anything. This is what backs the verifiability claim above. ~15s. |
+| **Unit tests** | Runs the v1 simulator and repo typecheck with Compact 0.31.1, plus the isolated v2 simulator and typecheck after a Compact 0.34.0 fast compile. |
+| **Frontend** | Installs the root, frontend, v1 browser protocol, and v2 browser protocol lockfiles before `tsc --noEmit` and a real `vite build`. This reproduces the physical package layout used to keep the two WASM/runtime generations isolated. |
+| **Byte-exact rebuilds** | Independent jobs delete and rebuild `src/managed/` with Compact 0.31.1 and `contracts/v2/managed/` with Compact 0.34.0, then assert each tree is byte-identical to the committed artifacts. Compiling into empty trees prevents either check from passing against untouched outputs. |
 | **Integration tests** | Full docker stack: node + indexer + proof server. |
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the frontend and uploads `frontend/dist` to the existing Cloudflare Pages project. A successful push-triggered CI run for the repository's current `main` commit automatically publishes that exact commit to `shielded-night.pages.dev`. Failed CI, pull-request CI, fork-originated runs, and CI for a commit that is no longer current `main` cannot publish. Production runs share a serialized concurrency lane and recheck `main` after waiting, so a late older CI completion cannot cancel or overwrite a newer release.
