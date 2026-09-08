@@ -10,8 +10,11 @@ import * as ledgerV2 from '@midnightntwrk/ledger-v9';
 import { MidnightBech32m } from '@midnightntwrk/wallet-sdk-address-format';
 import * as ShieldedNight from '../../../../contracts/v2/managed/contract/index.js';
 import { createProtocolSession, createWalletBoundary } from '../../shared/adapter-core';
+import { contractAssetBaseUrl, requireAbsoluteUrl } from '../../shared/asset-url';
 import type { ProfileBridge } from '../../shared/types';
 
+// Metadata only: `withCompiledFileAssets` stores this path on the compiled
+// contract and never fetches with it. The provider below needs an absolute URL.
 const ASSET_PATH = './contract/v2/shielded-night';
 const compiled = (CompiledContract.make as unknown as (name: string, contract: unknown) => any)(
   'ShieldedNight-v2',
@@ -51,10 +54,17 @@ const bridge: ProfileBridge = {
   deriveWrapperColor,
   async buildProviders(input) {
     const configuration = await input.connectedAPI.getConfiguration();
-    const zkConfigProvider = new FetchZkConfigProvider(ASSET_PATH, { fetchFunc: window.fetch.bind(window) });
+    // The SDK validates this argument with a bare `new URL(baseURL)`, so it must
+    // be absolute; a relative path throws "Failed to construct 'URL': Invalid URL".
+    const zkConfigProvider = new FetchZkConfigProvider(
+      contractAssetBaseUrl('v2', { origin: window.location.origin, base: import.meta.env.BASE_URL }),
+      { fetchFunc: window.fetch.bind(window) },
+    );
+    // Same bare `new URL()` check inside the indexer provider: name the offending
+    // field and value instead of surfacing the opaque TypeError.
     const publicDataProvider = indexerPublicDataProvider({
-      queryURL: configuration.indexerUri,
-      subscriptionURL: configuration.indexerWsUri,
+      queryURL: requireAbsoluteUrl(configuration.indexerUri, 'indexer URL', ['http:', 'https:']),
+      subscriptionURL: requireAbsoluteUrl(configuration.indexerWsUri, 'indexer WebSocket URL', ['ws:', 'wss:']),
     });
     const originalQuery = publicDataProvider.queryZSwapAndContractState.bind(publicDataProvider);
     publicDataProvider.queryZSwapAndContractState = async (...args: Parameters<typeof originalQuery>) => {

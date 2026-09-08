@@ -53,6 +53,8 @@ The production build contains four distinct runtime assets: v1 and v2 ledger WAS
 - `/contract/v2/shielded-night`
 - `/contract/compiled/shielded-night` (legacy v1 URL for already-open clients)
 
+Each adapter resolves its path to an absolute URL from the page origin and the Vite base (`protocols/shared/asset-url.ts`) before handing it to the SDK, because `FetchZkConfigProvider` validates its argument with a bare `new URL()` and rejects a relative path with `Failed to construct 'URL': Invalid URL`.
+
 The sNight token identity is derived inside the selected adapter with that generation's ledger package.
 
 ## Conversion and switching behavior
