@@ -40,6 +40,54 @@ export const COMPATIBILITY = {
 
 export const REPOSITORY_ROOT = path.resolve(new URL(import.meta.url).pathname, '..', '..', '..', '..');
 export const MANAGED_DIRECTORY = path.resolve(REPOSITORY_ROOT, 'contracts', 'v2', 'managed');
+
+/**
+ * The environments the v2 (compiler 0.34.0 / ledger-v9) scripts can target.
+ * `stagenet` is the default and keeps every rule it had before `undeployed`
+ * existed: a durable, absolute, operator-supplied maintenance key.
+ * `undeployed` is a throwaway local devnet — same code path, relaxed custody.
+ */
+export const V2_ENV_NAMES = ['stagenet', 'undeployed'] as const;
+export type V2EnvName = (typeof V2_ENV_NAMES)[number];
+
+export const isV2EnvName = (value: string): value is V2EnvName =>
+  (V2_ENV_NAMES as readonly string[]).includes(value);
+
+/** `MN_ENV`, defaulting to `stagenet` so nothing changes for today's callers. */
+export function requestedEnv(): V2EnvName {
+  const requested = process.env.MN_ENV?.trim() || 'stagenet';
+  if (!isV2EnvName(requested)) {
+    throw new Error(`Invalid MN_ENV "${requested}". The v2 commands support ${V2_ENV_NAMES.join(' | ')}.`);
+  }
+  return requested;
+}
+
+/**
+ * The wallet network id per env. These are exactly `NetworkId.NetworkId.StageNet`
+ * and `NetworkId.NetworkId.Undeployed` from `@midnightntwrk/wallet-sdk`
+ * 2.0.0-beta.2; the literals live here so the unit tier can import this module
+ * without loading the WASM-bearing wallet barrel. `deploy.ts` pins the mapping
+ * to the SDK's own constants at typecheck time.
+ */
+export const WALLET_NETWORK_IDS = {
+  stagenet: 'stagenet',
+  undeployed: 'undeployed',
+} as const satisfies Record<V2EnvName, string>;
+
+export const walletNetworkIdFor = (env: V2EnvName): (typeof WALLET_NETWORK_IDS)[V2EnvName] =>
+  WALLET_NETWORK_IDS[env];
+
+/**
+ * Genesis-block-funded devnet seed — the SAME constant the 1.x lane uses
+ * (`test/support/network.ts` GENESIS_MINT_SEED). Only ever valid on
+ * `undeployed`: on a local devnet it is the funding faucet and is shared with
+ * every other facade on that stack, so callers that matter pass `MN_SEED`.
+ */
+export const GENESIS_MINT_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
+
+/** Level DB store name for an env's private state (never shared between envs). */
+export const privateStateStoreName = (env: V2EnvName, suffix = ''): string =>
+  `shielded-night-v2-${env}${suffix}`;
 export const DEFAULT_WALLET_SYNC_TIMEOUT_MS = 300_000;
 const MIN_WALLET_SYNC_TIMEOUT_MS = 30_000;
 const MAX_WALLET_SYNC_TIMEOUT_MS = 900_000;
@@ -95,7 +143,7 @@ export async function withSyncedDeploymentWallet<TWallet, TResult>(
 interface MaintenanceKeyRecord {
   readonly schemaVersion: 1;
   readonly recordKind: 'shielded-night-maintenance-signing-key';
-  readonly network: 'stagenet';
+  readonly network: V2EnvName;
   readonly signingKey: SigningKey;
   readonly verifyingKey: SignatureVerifyingKey;
   readonly createdAt: string;
@@ -136,8 +184,33 @@ function normalizeVerifyingKey(value: unknown): SignatureVerifyingKey {
 const sameVerifyingKey = (left: SignatureVerifyingKey, right: SignatureVerifyingKey): boolean =>
   left.tag === right.tag && left.value.toLowerCase() === right.value.toLowerCase();
 
-export function maintenanceKeyPath(): string {
+/** Default `undeployed` key location: the repo's gitignored private-state area. */
+export const UNDEPLOYED_MAINTENANCE_KEY_PATH = path.resolve(
+  REPOSITORY_ROOT,
+  '.local',
+  'private-state',
+  'v2-undeployed',
+  'maintenance-key.json',
+);
+
+/**
+ * Where the maintenance signing key lives.
+ *
+ * `stagenet` is unchanged: an operator must name an absolute path on durable
+ * storage, because losing that key locks the funded deployment out of every
+ * future maintenance transaction.
+ *
+ * `undeployed` is a throwaway devnet, so the file is optional and defaults into
+ * the repository's gitignored private-state directory; a relative
+ * `MN_MAINTENANCE_KEY_FILE` is accepted there and resolved against the cwd.
+ * Mode 0600 and the write/read-back check still apply on both — that is
+ * secret hygiene, not durability.
+ */
+export function maintenanceKeyPath(env: V2EnvName = requestedEnv()): string {
   const configured = process.env.MN_MAINTENANCE_KEY_FILE?.trim();
+  if (env === 'undeployed') {
+    return configured ? path.resolve(configured) : UNDEPLOYED_MAINTENANCE_KEY_PATH;
+  }
   if (!configured) {
     throw new Error('Set MN_MAINTENANCE_KEY_FILE to an explicit durable, private maintenance-key file path.');
   }
@@ -147,7 +220,7 @@ export function maintenanceKeyPath(): string {
   return configured;
 }
 
-function readMaintenanceKeyRecord(destination: string): MaintenanceKeyRecord {
+function readMaintenanceKeyRecord(destination: string, expectedNetwork: V2EnvName): MaintenanceKeyRecord {
   let file: number | undefined;
   try {
     file = openSync(destination, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -161,8 +234,21 @@ function readMaintenanceKeyRecord(destination: string): MaintenanceKeyRecord {
       throw new Error('Maintenance key file must contain a JSON object.');
     }
     const record = parsed as Partial<MaintenanceKeyRecord>;
-    if (record.schemaVersion !== 1 || record.recordKind !== 'shielded-night-maintenance-signing-key' || record.network !== 'stagenet') {
+    if (
+      record.schemaVersion !== 1 ||
+      record.recordKind !== 'shielded-night-maintenance-signing-key' ||
+      typeof record.network !== 'string' ||
+      !isV2EnvName(record.network)
+    ) {
       throw new Error('Maintenance key file has an unsupported schema or network.');
+    }
+    // A key belongs to exactly one network: reusing a stagenet key on a
+    // throwaway devnet (or the reverse) would put the funded deployment's
+    // maintenance identity on a chain nobody controls.
+    if (record.network !== expectedNetwork) {
+      throw new Error(
+        `Maintenance key file was created for network "${record.network}" but MN_ENV is "${expectedNetwork}".`,
+      );
     }
     if (typeof record.createdAt !== 'string' || !record.createdFor ||
       !/^[0-9a-f]{40}$/i.test(record.createdFor.sourceCommit ?? '') ||
@@ -183,7 +269,7 @@ function readMaintenanceKeyRecord(destination: string): MaintenanceKeyRecord {
     return {
       schemaVersion: 1,
       recordKind: 'shielded-night-maintenance-signing-key',
-      network: 'stagenet',
+      network: record.network,
       signingKey,
       verifyingKey,
       createdAt: record.createdAt,
@@ -203,10 +289,10 @@ function readMaintenanceKeyRecord(destination: string): MaintenanceKeyRecord {
 export function prepareMaintenanceSigningKey(input: {
   sourceCommit: string;
   artifactSha256: string;
-}): PreparedMaintenanceKey {
-  const destination = maintenanceKeyPath();
+}, env: V2EnvName = requestedEnv()): PreparedMaintenanceKey {
+  const destination = maintenanceKeyPath(env);
   if (existsSync(destination)) {
-    const existing = readMaintenanceKeyRecord(destination);
+    const existing = readMaintenanceKeyRecord(destination, env);
     return { path: destination, signingKey: existing.signingKey, verifyingKey: existing.verifyingKey, created: false };
   }
 
@@ -216,7 +302,7 @@ export function prepareMaintenanceSigningKey(input: {
   const record: MaintenanceKeyRecord = {
     schemaVersion: 1,
     recordKind: 'shielded-night-maintenance-signing-key',
-    network: 'stagenet',
+    network: env,
     signingKey,
     verifyingKey,
     createdAt: new Date().toISOString(),
@@ -250,7 +336,7 @@ export function prepareMaintenanceSigningKey(input: {
   // The deployer never trusts its own write. Close and reopen the durable file,
   // enforce its permissions, and derive the public identity again before any
   // wallet is started or transaction can be submitted.
-  const persisted = readMaintenanceKeyRecord(destination);
+  const persisted = readMaintenanceKeyRecord(destination, env);
   if (!sameVerifyingKey(persisted.verifyingKey, verifyingKey) ||
     persisted.signingKey.tag !== signingKey.tag || persisted.signingKey.value !== signingKey.value) {
     throw new Error('Maintenance signing key did not survive durable write/read-back validation.');
@@ -258,12 +344,13 @@ export function prepareMaintenanceSigningKey(input: {
   return { path: destination, signingKey: persisted.signingKey, verifyingKey: persisted.verifyingKey, created: true };
 }
 
-/** Run wallet startup/submission only after durable key creation and read-back. */
+/** Run wallet startup/submission only after key creation and read-back. */
 export async function withDurableMaintenanceKey<T>(
   input: { sourceCommit: string; artifactSha256: string },
   action: (key: PreparedMaintenanceKey) => Promise<T>,
+  env: V2EnvName = requestedEnv(),
 ): Promise<T> {
-  const key = prepareMaintenanceSigningKey(input);
+  const key = prepareMaintenanceSigningKey(input, env);
   return await action(key);
 }
 
@@ -291,6 +378,30 @@ export const stagenet = () => ({
   proofServer: envUrl('MN_PROOF_SERVER_URL', 'http://127.0.0.1:6300'),
   faucet: undefined,
 });
+
+/**
+ * A local ledger-v9 devnet. The loopback defaults are the 1.x lane's
+ * (`test/support/network.ts` UndeployedNetwork): indexer 8088, node 9944,
+ * proof server 6300. Every endpoint is overridable because a caller inside the
+ * stack's docker network must dial service hostnames instead.
+ */
+export const undeployed = () => ({
+  walletNetworkId: 'undeployed' as const,
+  networkId: 'undeployed',
+  indexer: envUrl('MN_INDEXER_URL', 'http://127.0.0.1:8088/api/v4/graphql'),
+  indexerWS: envUrl('MN_INDEXER_WS_URL', 'ws://127.0.0.1:8088/api/v4/graphql/ws'),
+  node: envUrl('MN_NODE_URL', 'http://127.0.0.1:9944'),
+  nodeWS: envUrl('MN_NODE_WS_URL', 'ws://127.0.0.1:9944'),
+  proofServer: envUrl('MN_PROOF_SERVER_URL', 'http://127.0.0.1:6300'),
+  faucet: undefined,
+});
+
+export type V2Profile = ReturnType<typeof stagenet> | ReturnType<typeof undeployed>;
+
+/** Resolved per CALL, so endpoint overrides set after import still apply. */
+export function profileFor(env: V2EnvName): V2Profile {
+  return env === 'undeployed' ? undeployed() : stagenet();
+}
 
 const bytesEqual = (left: Uint8Array, right: Uint8Array): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -399,16 +510,16 @@ export function assertMaintenanceAuthorityKey(
   }
 }
 
-export function recordPath(address: string): string {
+export function recordPath(address: string, env: V2EnvName = requestedEnv()): string {
   const configured = process.env.DEPLOY_OUT?.trim();
   return configured
     ? path.resolve(configured)
-    : path.resolve(REPOSITORY_ROOT, '.local', 'deployments', `v2-stagenet-${address}.json`);
+    : path.resolve(REPOSITORY_ROOT, '.local', 'deployments', `v2-${env}-${address}.json`);
 }
 
 /** Prove the record directory is writable before a deployment can spend funds. */
-export function preflightRecordOutput(): void {
-  const destination = recordPath('preflight');
+export function preflightRecordOutput(env: V2EnvName = requestedEnv()): void {
+  const destination = recordPath('preflight', env);
   if (existsSync(destination) && statSync(destination).isDirectory()) {
     throw new Error(`Deployment record output is a directory: ${destination}`);
   }
@@ -433,11 +544,12 @@ export interface ConfirmedDeploymentTransaction {
 export function reportConfirmedDeployment(
   transaction: ConfirmedDeploymentTransaction,
   log: (message: string) => void = console.log,
+  env: V2EnvName = requestedEnv(),
 ): string {
   const address = transaction.contractAddress;
-  log(`[deploy] confirmed stagenet contract ${address}`);
+  log(`[deploy] confirmed ${env} contract ${address}`);
   log(`[deploy] confirmed transaction ${transaction.txId}`);
-  log(`STAGENET_ADDRESS=${address}`);
+  log(`${env.toUpperCase()}_ADDRESS=${address}`);
   return address;
 }
 
@@ -518,8 +630,8 @@ export function mergeVerificationRecord(input: {
   };
 }
 
-export function readRecord(address: string): Record<string, unknown> | undefined {
-  const destination = recordPath(address);
+export function readRecord(address: string, env: V2EnvName = requestedEnv()): Record<string, unknown> | undefined {
+  const destination = recordPath(address, env);
   if (!existsSync(destination)) return undefined;
   const value: unknown = JSON.parse(readFileSync(destination, 'utf8'));
   return value != null && typeof value === 'object' && !Array.isArray(value)
@@ -527,8 +639,8 @@ export function readRecord(address: string): Record<string, unknown> | undefined
     : undefined;
 }
 
-export function writeRecord(record: Record<string, unknown>, address: string): string {
-  const destination = recordPath(address);
+export function writeRecord(record: Record<string, unknown>, address: string, env: V2EnvName = requestedEnv()): string {
+  const destination = recordPath(address, env);
   mkdirSync(path.dirname(destination), { recursive: true });
   const temporary = `${destination}.tmp.${process.pid}`;
   writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });

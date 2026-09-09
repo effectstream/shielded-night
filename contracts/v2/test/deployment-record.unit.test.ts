@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { unshieldedToken } from '@midnightntwrk/ledger-v9';
 import {
   assertMaintenanceAuthorityKey,
@@ -38,8 +38,17 @@ const originalDeployOut = process.env.DEPLOY_OUT;
 const originalSourceCommit = process.env.SHIELDED_NIGHT_COMMIT;
 const originalMaintenanceKeyFile = process.env.MN_MAINTENANCE_KEY_FILE;
 const originalWalletSyncTimeout = process.env.MN_WALLET_SYNC_TIMEOUT_MS;
+const originalEnv = process.env.MN_ENV;
+
+// Every assertion in this file pins the DEFAULT (stagenet) lane, so the
+// `undeployed` lane cannot change it by being exported in the caller's shell.
+beforeEach(() => {
+  delete process.env.MN_ENV;
+});
 
 afterEach(() => {
+  if (originalEnv === undefined) delete process.env.MN_ENV;
+  else process.env.MN_ENV = originalEnv;
   if (originalDeployOut === undefined) delete process.env.DEPLOY_OUT;
   else process.env.DEPLOY_OUT = originalDeployOut;
   if (originalSourceCommit === undefined) delete process.env.SHIELDED_NIGHT_COMMIT;
