@@ -1,23 +1,23 @@
-/** Read-only stagenet verifier for a compiler 0.34.0 Shielded NIGHT deployment. */
+/** Read-only verifier for a compiler 0.34.0 Shielded NIGHT deployment (MN_ENV=stagenet | undeployed). */
 import '../../../scripts/load-env.js';
 import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-public-data-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import {
   artifactSha256,
   mergeVerificationRecord,
+  profileFor,
   readRecord,
+  requestedEnv,
   sourceCommit,
-  stagenet,
   verifyAddress,
   writeRecord,
 } from './profile.js';
 
 async function main() {
-  const requested = process.env.MN_ENV?.trim() || 'stagenet';
-  if (requested !== 'stagenet') throw new Error('The v2 verifier only supports MN_ENV=stagenet.');
+  const env = requestedEnv();
   const address = process.env.CV_ADDRESS?.trim();
-  if (!address) throw new Error('Set CV_ADDRESS to the stagenet Shielded NIGHT contract address.');
-  const profile = stagenet();
+  if (!address) throw new Error(`Set CV_ADDRESS to the ${env} Shielded NIGHT contract address.`);
+  const profile = profileFor(env);
   setNetworkId(profile.networkId);
   const publicDataProvider = indexerPublicDataProvider({
     queryURL: profile.indexer,
@@ -25,11 +25,11 @@ async function main() {
   });
   try {
     const verified = await verifyAddress(publicDataProvider, address);
-    const existing = readRecord(verified.address) ?? {};
+    const existing = readRecord(verified.address, env) ?? {};
     const record = mergeVerificationRecord({
       existing,
       network: {
-        name: 'stagenet',
+        name: env,
         networkId: profile.networkId,
         node: profile.node,
         indexer: profile.indexer,
@@ -39,7 +39,7 @@ async function main() {
       verificationArtifactSha256: artifactSha256(),
       verifiedAt: new Date().toISOString(),
     });
-    const recordPath = writeRecord(record, verified.address);
+    const recordPath = writeRecord(record, verified.address, env);
     console.log(`[verify:v2] code and metadata match ${verified.address}`);
     console.log(`[verify:v2] maintenance authority locked=${verified.authority.locked}`);
     console.log(`[verify:v2] record ${recordPath}`);

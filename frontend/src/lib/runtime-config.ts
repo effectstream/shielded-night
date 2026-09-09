@@ -21,9 +21,16 @@
  * present nothing changes: the build-time values are used exactly as before, so
  * this is backward compatible for every existing build and deployment.
  *
- * Only contract addresses are injectable. The wallet still supplies the
- * indexer / node / proof-server URLs (`getConfiguration()`), so a stack on
- * non-default ports needs no URL override lane in the page.
+ * The same lane carries `UNDEPLOYED_PROTOCOL` — the ledger generation the local
+ * `undeployed` network runs (`midnight-1.x`, the default, or `midnight-2.x`).
+ * A stack that brings up a Midnight 2.x devnet writes it next to the address:
+ *
+ *     window.SHIELDED_NIGHT = { UNDEPLOYED_PROTOCOL: "midnight-2.x", UNDEPLOYED_ADDRESS: "0123…" };
+ *
+ * Contract addresses and that protocol switch are the only injectable settings.
+ * The wallet still supplies the indexer / node / proof-server URLs
+ * (`getConfiguration()`), so a stack on non-default ports needs no URL override
+ * lane in the page.
  *
  * GREP MARKER: the literal `SHIELDED_NIGHT` is a property name on `window`, so
  * it survives minification and appears verbatim in the built bundle. A
@@ -42,8 +49,24 @@ export type ContractAddressVar =
   | 'STAGENET_ADDRESS'
   | 'UNDEPLOYED_ADDRESS';
 
+/**
+ * The protocol switch for the local `undeployed` network (build-time env AND
+ * runtime config share the name). The public networks are pinned to a ledger
+ * generation by the chain they are, so only `undeployed` has a switch.
+ */
+export type ProtocolVar = 'UNDEPLOYED_PROTOCOL';
+
+/** The two ledger generations the app carries an adapter for. */
+export type ProtocolFamilyName = 'midnight-1.x' | 'midnight-2.x';
+
+/** Accepted `UNDEPLOYED_PROTOCOL` values, in the order the error message lists them. */
+export const PROTOCOL_FAMILIES: readonly ProtocolFamilyName[] = ['midnight-1.x', 'midnight-2.x'];
+
+/** What `undeployed` is without any setting — today's behaviour, unchanged. */
+export const DEFAULT_UNDEPLOYED_PROTOCOL: ProtocolFamilyName = 'midnight-1.x';
+
 /** Shape of `window.SHIELDED_NIGHT`. Every key optional: inject only what the deployment knows. */
-export type ShieldedNightRuntimeConfig = Partial<Record<ContractAddressVar, string>>;
+export type ShieldedNightRuntimeConfig = Partial<Record<ContractAddressVar | ProtocolVar, string>>;
 
 declare global {
   interface Window {
@@ -81,3 +104,32 @@ export const resolveContractAddress = (
   buildTimeValue: string | undefined,
   host: RuntimeConfigHost | undefined = typeof window === 'undefined' ? undefined : window,
 ): string | undefined => nonEmpty(runtimeConfig(host)?.[key]) ?? nonEmpty(buildTimeValue);
+
+const isProtocolFamily = (value: string): value is ProtocolFamilyName =>
+  (PROTOCOL_FAMILIES as readonly string[]).includes(value);
+
+/** A resolved protocol family, or the message explaining why the value was rejected. */
+export type UndeployedProtocolResolution =
+  | { readonly family: ProtocolFamilyName; readonly error?: undefined }
+  | { readonly family?: undefined; readonly error: string };
+
+/**
+ * Ledger generation for the local `undeployed` network: the runtime-injected
+ * `UNDEPLOYED_PROTOCOL` if present and non-blank, else the build-time one, else
+ * `midnight-1.x` (what `undeployed` has always been). Values are trimmed and
+ * case-sensitive; anything else is an ERROR naming the variable and both
+ * accepted values — never a silent fallback, because a wrong guess here loads
+ * the wrong ledger adapter against a real chain.
+ */
+export const resolveUndeployedProtocol = (
+  buildTimeValue: string | undefined,
+  host: RuntimeConfigHost | undefined = typeof window === 'undefined' ? undefined : window,
+): UndeployedProtocolResolution => {
+  const value = nonEmpty(runtimeConfig(host)?.UNDEPLOYED_PROTOCOL) ?? nonEmpty(buildTimeValue);
+  if (value === undefined) return { family: DEFAULT_UNDEPLOYED_PROTOCOL };
+  if (isProtocolFamily(value)) return { family: value };
+  const shown = value.length > 40 ? `${value.slice(0, 40)}…` : value;
+  return {
+    error: `UNDEPLOYED_PROTOCOL must be ${PROTOCOL_FAMILIES.map((f) => `"${f}"`).join(' or ')}; got "${shown}".`,
+  };
+};

@@ -11,8 +11,19 @@
 //
 //     window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "0123…" };
 //
-// Per network, an injected address wins over the one baked in at build time
-// from frontend/.env; a blank or absent value falls through to the build-time
-// value. Keys: PREVIEW_ADDRESS, PREPROD_ADDRESS, STAGENET_ADDRESS,
-// UNDEPLOYED_ADDRESS. See src/lib/runtime-config.ts.
+// A stack whose local chain is a Midnight 2.x devnet also declares the ledger
+// generation the "Local (undeployed)" network runs, so the page loads the v2
+// adapter instead of the default v1 one:
+//
+//     window.SHIELDED_NIGHT = {
+//       UNDEPLOYED_PROTOCOL: "midnight-2.x",
+//       UNDEPLOYED_ADDRESS: "0123…",
+//     };
+//
+// Per key, an injected value wins over the one baked in at build time from
+// frontend/.env; a blank or absent value falls through to the build-time value.
+// Keys: PREVIEW_ADDRESS, PREPROD_ADDRESS, STAGENET_ADDRESS, UNDEPLOYED_ADDRESS
+// and UNDEPLOYED_PROTOCOL ("midnight-1.x" — the default — or "midnight-2.x";
+// any other value is reported on the page instead of being guessed at).
+// See src/lib/runtime-config.ts.
 window.SHIELDED_NIGHT = window.SHIELDED_NIGHT || {};

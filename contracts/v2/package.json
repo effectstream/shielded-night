@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:external": "vitest run --config vitest.external.config.ts",
     "deploy": "node --import tsx scripts/deploy.ts",
     "verify:deployment": "node --import tsx scripts/verify-deployment.ts"
   },

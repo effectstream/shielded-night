@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConnectedAPI, InitialAPI } from '@midnight-ntwrk/dapp-connector-api';
 import { connectWallet, findInitialAPIs, isCompatibleApiVersion } from '../lib/connector';
 import {
   contractAddressFor,
   contractConfigurationError,
-  NETWORKS,
+  protocolMismatchHint,
+  resolveNetwork,
   type NetworkOption,
 } from '../lib/networks';
 import type {
@@ -94,7 +95,10 @@ export function useShieldedNight(): ShieldedNightState {
   const sessionRef = useRef<ProtocolSession>();
   const generation = useRef(0);
 
-  const network = NETWORKS.find((item) => item.key === networkKey)!;
+  // Resolved (not static) so `undeployed` carries the protocol the
+  // UNDEPLOYED_PROTOCOL setting selects; memoised to keep a stable identity for
+  // the callbacks that depend on it.
+  const network = useMemo(() => resolveNetwork(networkKey), [networkKey]);
   const contractAddress = contractAddressFor(networkKey);
   const configurationError = contractConfigurationError(networkKey);
 
@@ -137,7 +141,7 @@ export function useShieldedNight(): ShieldedNightState {
     resetConnection();
     setError(undefined);
     setNetworkKeyState(key);
-    appendLog(`Selected ${NETWORKS.find((item) => item.key === key)?.label ?? key}; reconnect required.`);
+    appendLog(`Selected ${resolveNetwork(key).label}; reconnect required.`);
   }, [appendLog, networkKey, resetConnection]);
 
   const connect = useCallback(async (api: InitialAPI) => {
@@ -153,6 +157,9 @@ export function useShieldedNight(): ShieldedNightState {
     resetConnection();
     const requestGeneration = generation.current;
     let created: ProtocolSession | undefined;
+    // Set once the wallet is accepted and the ledger-generation-specific code
+    // starts: a failure from here on is the one a protocol mismatch produces.
+    let adapterReached = false;
     setConnecting(true);
     setError(undefined);
     appendLog(`Connecting ${api.name} to ${network.label} (${network.protocolFamily})…`);
@@ -165,6 +172,7 @@ export function useShieldedNight(): ShieldedNightState {
         throw new Error(`Wallet connected to ${configuration.networkId}; select ${network.networkId} in the wallet.`);
       }
 
+      adapterReached = true;
       created = network.protocolFamily === 'midnight-1.x'
         ? await import('../../protocols/v1/src/adapter').then((module) =>
           module.createV1Adapter(apiConnection, network.networkId, contractAddress))
@@ -198,6 +206,10 @@ export function useShieldedNight(): ShieldedNightState {
         setWalletName(undefined);
         setError(errMsg(caught));
         appendLog(`Connection failed: ${errMsg(caught)}`);
+        // The wallet never announces its ledger generation, so a 1.x wallet on
+        // a midnight-2.x local network (or the reverse) can only surface here.
+        const hint = adapterReached ? protocolMismatchHint(network.key) : undefined;
+        if (hint) appendLog(hint);
       }
     } finally {
       if (generation.current === requestGeneration) setConnecting(false);
