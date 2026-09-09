@@ -273,8 +273,15 @@ spendable, corrupting wallet state), and the credit withdraws again cleanly.
 - `getBalance(secret)` **throws** for a never-used secret (`balances.lookup`
   without a `member` guard). Off-chain callers must probe `balances.member`
   first. Pinned by tests in both tiers.
-- `depositShielded` requires the wallet to spend the *exact* `coin` passed as
-  the circuit argument. The round-trip test retains the coin returned by
-  `withdrawShielded` and passes it back verbatim.
+- `depositShielded` and `convertToUnshielded` do **not** require the wallet to
+  own the `coin` passed as the circuit argument. `receive` claims that coin as
+  an output addressed to the contract, and the wallet funds it from its own
+  wrapper balance (inputs + change), so what is required is *enough sNight*,
+  not that exact coin — any nonce and any value up to the balance balances.
+  The round-trip test passes back the coin `withdrawShielded` returned because
+  that is convenient, not because it is necessary;
+  [test/integration/shielded-night.reverse-any-amount.test.ts](test/integration/shielded-night.reverse-any-amount.test.ts)
+  reverses fractions, a wallet change coin and two merged coins with fresh
+  random nonces, and shows the only failure mode is `Wallet.InsufficientFunds`.
 - The historical live e2e (pre-git, different monorepo) is documented in
   [README.md](README.md) under "Live status".

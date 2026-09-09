@@ -22,11 +22,7 @@ export default function App() {
       )}
 
       {sn.connected && (
-        <BalancePanel
-          balances={sn.balances}
-          onRefresh={() => void sn.refreshBalances()}
-          mintedTotal={sn.balances?.trackedWrapperCoins.reduce((total, coin) => total + coin.value, 0n) ?? 0n}
-        />
+        <BalancePanel balances={sn.balances} onRefresh={() => void sn.refreshBalances()} />
       )}
 
       <SwapCard key={sn.networkKey} sn={sn} />

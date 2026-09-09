@@ -92,11 +92,13 @@ Changing the selector disposes the old protocol session, clears balances and ope
 
 The unfinished-swaps panel remains able to resume deposits created by the older two-step UI. Recovery uses the selected protocol adapter and refuses records belonging to another contract.
 
-### Reverse coin limitation
+### Reverse conversion and the coin store
 
-The connector exposes shielded balances by token and amount, without the nonce of each owned coin. `convertToUnshielded` must receive that exact nonce, color and value, so the frontend persists the deterministic coin candidate before forward wallet interaction and makes it spendable only after the contract returns the same coin. Reverse conversion therefore spends one whole coin minted and retained by this browser. Valid records from the older v1 two-step UI migrate into the scoped v1 store.
+`convertToUnshielded` claims its coin as an output addressed to the contract, and the wallet funds that output by ordinary shielded coin selection: inputs of the wrapper token totalling at least the amount, plus change. The nonce is chosen by this app and does not have to match a coin the wallet owns. Reverse conversion therefore works for **any amount up to the wallet's sNight balance**, whatever minted those coins — this browser, another browser, the other origin, or another wallet that sent them. The adapter builds a fresh random 32-byte nonce for the requested amount and checks the amount against `getShieldedBalances()` before any wallet interaction, so an over-large amount is reported as the wallet total instead of failing during balancing.
 
-An uncertain forward or reverse submission keeps the coin record quarantined with its transaction id and network; it is not offered again automatically. A known pre-submission failure or wallet cancellation removes a pending forward candidate. sNight received from another wallet, previously minted by the atomic UI that discarded its result, or cleared from browser storage cannot be reversed until the wallet connector exposes coin-level details.
+This is proven on chain, not inferred: [test/integration/shielded-night.reverse-any-amount.test.ts](../test/integration/shielded-night.reverse-any-amount.test.ts) reverses half of a minted coin, then the wallet's own change coin, then the merged value of two separately minted coins — each with a fresh nonce — and shows the only remaining failure is `Wallet.InsufficientFunds`.
+
+The browser coin store is **not** the set of reversible coins. It records what this browser minted (so a forward conversion's exact coin is never fabricated) and carries the older v1 two-step UI's records, which still resume through it; valid legacy records migrate into the scoped v1 store. An uncertain forward submission keeps its minted record quarantined with the transaction id and network, and a known pre-submission failure or wallet cancellation removes a pending forward candidate. An uncertain reverse submission is reported with its transaction id and must not be retried blindly — a retry converts more sNight.
 
 ## Validation
 

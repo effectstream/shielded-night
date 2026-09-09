@@ -2,15 +2,17 @@ import { useState } from 'react';
 import type { Balances } from '../../protocols/shared/types';
 import { formatAmount } from '../lib/tokens';
 
+// No mint-versus-balance warning here. The browser's coin store records only
+// what this browser minted, and the wallet's sNight moves independently of it:
+// a reverse conversion (any amount, funded by wallet coin selection), a
+// transfer, or a mint from another browser all make "minted here" differ from
+// the wallet total legitimately. The old warning fired on exactly those cases.
 export function BalancePanel({
   balances,
   onRefresh,
-  mintedTotal,
 }: {
   balances?: Balances;
   onRefresh: () => void;
-  /** sNight this dApp has minted (tracked coins) - used to detect a real mismatch. */
-  mintedTotal: bigint;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -42,8 +44,6 @@ export function BalancePanel({
       <span className="bal-k">{label}</span>
     );
 
-  const anomaly = mintedTotal > 0n && (!balances || !balances.wrapperMatched || balances.wrapper === 0n);
-
   return (
     <div className="balances">
       <div className="balances-row">
@@ -60,12 +60,6 @@ export function BalancePanel({
           ↻
         </button>
       </div>
-      {anomaly && (
-        <p className="small warn" style={{ margin: '6px 0 0' }}>
-          This dApp minted {formatAmount(mintedTotal)} sNight but the wallet doesn't show it under the expected token
-          type (derived from the contract address). Check the network's address in .env matches the deployed contract.
-        </p>
-      )}
     </div>
   );
 }
