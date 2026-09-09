@@ -56,9 +56,12 @@ describe('shielded-night — security', () => {
         const colorHex = tokenColorHex(color);
         const me = await getCoinPublicKey(c.walletCtx);
 
-        // --- Vector 1: a coin that was never minted. The circuit's
-        // receiveShielded claims it, but no wallet can supply the UTXO, so the
-        // transaction cannot balance.
+        // --- Vector 1: a coin that was never minted. receiveShielded claims it
+        // as an output addressed to the contract, but the wallet holds no sNight
+        // to fund that output (nothing minted yet), so the transaction cannot
+        // balance. What blocks the attack is the missing balance, not the nonce:
+        // see shielded-night.reverse-any-amount.test.ts, where a fresh nonce
+        // funded by a real balance succeeds.
         const thief = randomBytes32();
         await attemptFails(() =>
           contract.depositShielded(deployed, thief, { nonce: randomBytes32(), color, value: N }),
@@ -75,8 +78,9 @@ describe('shielded-night — security', () => {
         ).private.result;
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b >= N);
 
-        // --- Vector 2: the real coin's nonce with an inflated value. The
-        // commitment doesn't match any owned UTXO, so it cannot balance.
+        // --- Vector 2: the real coin's nonce with an inflated value. The wallet
+        // holds N of the wrapper, not 2N, so it cannot fund an output of 2N and
+        // the transaction cannot balance. Inflation buys nothing.
         await attemptFails(() =>
           contract.depositShielded(deployed, thief, { ...coin, value: N * 2n }),
         );
@@ -85,7 +89,9 @@ describe('shielded-night — security', () => {
         await contract.depositShielded(deployed, owner, coin);
         expect((await contract.getBalance(deployed, owner)).private.result).toBe(N);
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b === 0n);
-        // ...and the second attempt with the same (now spent) coin fails.
+        // ...and the second attempt fails: the burn consumed the wrapper, so the
+        // balance is 0 and there is nothing left to fund the output with (and
+        // re-creating the same commitment would be rejected in any case).
         await attemptFails(() => contract.depositShielded(deployed, owner, coin));
         expect((await contract.getBalance(deployed, owner)).private.result).toBe(N);
 
@@ -176,8 +182,10 @@ describe('shielded-night — security', () => {
         const myAddr = contract.rightUserAddress(getUserAddress(c.walletCtx).bytes);
         const night0 = await getNightBalance(c.walletCtx);
 
-        // --- Vector 1: a coin that was never minted. receiveShielded claims
-        // it, but no wallet can supply the UTXO, so the tx cannot balance.
+        // --- Vector 1: a coin that was never minted. receiveShielded claims it
+        // as a contract-owned output, but the wallet holds no sNight yet to fund
+        // that output, so the tx cannot balance. (With a real balance the same
+        // fresh-nonce shape succeeds — shielded-night.reverse-any-amount.test.ts.)
         await attemptFails(() =>
           contract.convertToUnshielded(
             deployed,
@@ -191,8 +199,8 @@ describe('shielded-night — security', () => {
         const coin = (await contract.convertToShielded(deployed, N, me, nonce)).private.result;
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b >= N);
 
-        // --- Vector 2: the real coin's nonce with an inflated value. The
-        // commitment doesn't match any owned UTXO, so it cannot balance.
+        // --- Vector 2: the real coin's nonce with an inflated value. The wallet
+        // holds N of the wrapper, not 2N, so it cannot fund an output of 2N.
         await attemptFails(() =>
           contract.convertToUnshielded(deployed, { ...coin, value: 2n * N }, myAddr),
         );
@@ -201,7 +209,8 @@ describe('shielded-night — security', () => {
         await contract.convertToUnshielded(deployed, coin, myAddr);
         await waitForShieldedBalance(c.walletCtx.wallet, colorHex, (b) => b === 0n);
         expect(await waitForUnshieldedBalance(c.walletCtx.wallet, NIGHT_HEX, (b) => b >= night0)).toBe(night0);
-        // ...and a second release against the same (now spent) coin fails.
+        // ...and a second release fails: the wrapper balance is now 0, so there
+        // is nothing left to fund the output with.
         await attemptFails(() => contract.convertToUnshielded(deployed, coin, myAddr));
 
         // --- Vector 4: replay-mint. Re-minting with the SAME nonce reproduces
@@ -255,8 +264,9 @@ describe.skipIf((process.env.MN_ENV ?? 'undeployed') !== 'undeployed')(
           ).private.result;
           await waitForShieldedBalance(alice.walletCtx.wallet, colorHex, (b) => b >= N);
 
-          // Bob knows the coin's public info but does not own the UTXO: his
-          // wallet cannot supply it, so the deposit cannot balance.
+          // Bob knows the coin's public info, but he holds no sNight of his own:
+          // his wallet cannot fund the output the circuit claims, so the deposit
+          // cannot balance. Alice's balance is hers, not his.
           await attemptFails(() => contract.depositShielded(bobView, secretB, aliceCoin));
           const state = await contract.factory.readLedger(bob.providers, address);
           expect(state?.balances.member(new Uint8Array(32))).toBe(false);
