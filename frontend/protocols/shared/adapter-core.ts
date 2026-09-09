@@ -311,15 +311,37 @@ export async function createProtocolSession(input: {
         callbacks.onLog?.(`Minted ${amount} sNight (single tx)`);
         return;
       }
+      // `convertToUnshielded` claims its coin as an output addressed to the
+      // contract; the wallet funds that output from the sNight it holds, with
+      // ordinary coin selection (inputs of that token type + change). The nonce
+      // is ours to choose and need not match an owned coin, so any amount up to
+      // the wallet's balance converts — including coins this browser never saw.
+      // Proven on chain in test/integration/shielded-night.reverse-any-amount.test.ts.
+      //
+      // The check runs before any step/log callback: a locally rejected amount
+      // must not leave "approve in wallet" in the activity log.
+      const walletTotal = pickBalance(await connectedAPI.getShieldedBalances(), [wrapperColorHex])?.value ?? 0n;
+      if (amount > walletTotal) {
+        // Backstop for a stale UI balance — the swap card checks first and
+        // formats for display. This layer has no decimals context, so it says
+        // "base units" rather than printing a raw number as if it were sNight,
+        // and attaches both values for a caller that wants to format them.
+        throw Object.assign(
+          new Error(
+            `The requested amount (${amount} base units) exceeds the wallet's sNight balance (${walletTotal} base units).`,
+          ),
+          { walletTotal, requested: amount },
+        );
+      }
       callbacks.onStep?.('started', 'Converting sNight → NIGHT in one transaction…');
       callbacks.onLog?.('convertToUnshielded — approve in wallet');
-      const coin = coinStore.available().find((candidate) => candidate.value === amount
-        && bytesToHex(candidate.color) === normalizeTokenId(wrapperColorHex));
-      if (!coin) {
-        throw new Error('Reverse conversion requires one exact sNight coin minted and retained by this browser.');
-      }
-      coinStore.stage(coin);
-      let callCompleted = false;
+      const coin: ShieldedCoinInfo = {
+        nonce: randomBytes32(),
+        color: hexToBytes(wrapperColorHex),
+        value: amount,
+      };
+      // No coin-store bookkeeping on this path: the store records what this
+      // browser minted, not what can be reversed.
       try {
         await callCircuit('convertToUnshielded', [
           coin,
@@ -329,13 +351,17 @@ export async function createProtocolSession(input: {
             right: { bytes: bridge.addressToBytes(unshielded.unshieldedAddress) },
           },
         ]);
-        callCompleted = true;
-        coinStore.remove(coin);
       } catch (error) {
-        if (callCompleted) throw error;
         const identity = submissionIdentity(error);
-        if (identity) coinStore.markUncertain(coin, identity.transactionId, identity.networkId ?? networkId);
-        else coinStore.add(coin);
+        if (identity) {
+          throw Object.assign(
+            new Error(
+              `Transaction ${identity.transactionId} was submitted on ${identity.networkId ?? networkId}, but finalization could not be confirmed. Check that transaction before converting again — a blind retry converts more sNight.`,
+              { cause: error },
+            ),
+            { transactionId: identity.transactionId, networkId: identity.networkId ?? networkId },
+          );
+        }
         throw error;
       }
       callbacks.onStep?.('done', 'Converted in one transaction ✓');

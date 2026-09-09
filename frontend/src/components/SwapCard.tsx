@@ -18,12 +18,15 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
   const [localErr, setLocalErr] = useState<string>();
 
   const { from, to } = TOKENS[direction];
-  const trackedCoins = sn.balances?.trackedWrapperCoins ?? [];
   const blockedCoins = sn.balances?.blockedWrapperCoins ?? [];
+  // Reverse conversion spends the wallet's sNight balance: the wallet funds the
+  // contract-owned output with its own coin selection, so any amount up to the
+  // total works regardless of which browser or wallet minted those coins.
+  const walletWrapper = sn.balances?.wrapper ?? 0n;
   const ready = sn.connected
     && !!sn.contractAddress
     && !sn.configurationError
-    && (direction === 'toShielded' || trackedCoins.length > 0);
+    && (direction === 'toShielded' || walletWrapper > 0n);
 
   const flip = () => {
     setDirection((d) => (d === 'toShielded' ? 'toUnshielded' : 'toShielded'));
@@ -34,7 +37,7 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
   // for reverse (the wallet funds the conversion + change during balancing).
   const maxBase = direction === 'toShielded'
     ? (sn.balances?.nativeNight ?? 0n)
-    : trackedCoins.reduce((largest, coin) => coin.value > largest ? coin.value : largest, 0n);
+    : walletWrapper;
   const onMax = () => {
     setLocalErr(undefined);
     setAmount(formatAmount(maxBase));
@@ -49,6 +52,16 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       if (amt <= 0n) throw new Error('Enter an amount greater than zero');
     } catch (e) {
       setLocalErr(errMsg(e));
+      return;
+    }
+
+    // Reverse conversion is bounded by the wallet's sNight balance. Check it
+    // here so the message can be formatted in sNight (the adapter's own check
+    // is the authoritative backstop, but it only knows base units and would
+    // otherwise log "approve in wallet" for an amount we already know is too
+    // large).
+    if (direction === 'toUnshielded' && amt > walletWrapper) {
+      setLocalErr(`The wallet holds ${formatAmount(walletWrapper)} sNight; enter an amount up to that total.`);
       return;
     }
 
@@ -120,13 +133,11 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       {direction === 'toUnshielded' && (
         <>
           <p className="small muted" style={{ marginBottom: 0 }}>
-            Reverse conversion spends one exact coin retained by this browser. Wallet total:{' '}
-            <b>{formatAmount(sn.balances?.wrapper ?? 0n)}</b> sNight. Tracked coin amounts:{' '}
-            <b>{trackedCoins.length ? trackedCoins.map((coin) => formatAmount(coin.value)).join(', ') : 'none'}</b>.
+            Wallet total: <b>{formatAmount(walletWrapper)}</b> sNight.
           </p>
           {blockedCoins.length > 0 && (
             <p className="small warn" style={{ marginBottom: 0 }}>
-              {blockedCoins.map((coin) => `${formatAmount(coin.value)} sNight ${coin.status}${coin.transactionId ? ` (tx ${coin.transactionId}, ${coin.networkId ?? sn.networkKey})` : ' (no transaction id recorded)'}`).join('; ')}. Do not retry these coins until the transaction is checked.
+              {blockedCoins.map((coin) => `${formatAmount(coin.value)} sNight ${coin.status}${coin.transactionId ? ` (tx ${coin.transactionId}, ${coin.networkId ?? sn.networkKey})` : ' (no transaction id recorded)'}`).join('; ')}. This browser minted those coins without a confirmed outcome; check their transactions. They do not restrict what you can convert back.
             </p>
           )}
         </>
@@ -148,10 +159,8 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
         <p className="small muted" style={{ marginBottom: 0 }}>
           {sn.configurationError
             ? sn.configurationError
-            : direction === 'toUnshielded' && sn.connected && trackedCoins.length === 0 && blockedCoins.length > 0
-              ? 'A retained sNight coin has a pending or uncertain outcome. Check its transaction status before retrying.'
-              : direction === 'toUnshielded' && sn.connected && trackedCoins.length === 0
-              ? 'No exact sNight coin is retained by this browser; received or previously untracked coins cannot be reversed with the current wallet API.'
+            : direction === 'toUnshielded' && sn.connected && walletWrapper === 0n
+              ? 'No sNight in the wallet.'
             : sn.connected
               ? `Reconnect the wallet to ${sn.networkKey}.`
             : 'Connect a wallet to swap.'}

@@ -11,6 +11,9 @@ const shieldedAddress = {
   shieldedEncryptionPublicKey: 'encryption-key',
 };
 
+const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
 const transaction = (bytes: number[], id = 'balanced-transaction') => ({
   identifiers: () => [id],
   serialize: () => Uint8Array.from(bytes),
@@ -222,12 +225,11 @@ describe('frontend wallet transaction boundary', () => {
     expect(error.message).toContain('stagenet-tx submission on stagenet could not be confirmed');
   });
 
-  it('stores the exact forward result and reuses it for reverse instead of fabricating a coin', async () => {
+  it('stores the exact forward result the contract returned instead of a fabricated coin', async () => {
     const storage = new MemoryStorage();
     const wrapperColor = 'ab'.repeat(32);
     let mintedCoin: ShieldedCoinInfo | undefined;
     let stagedBeforeWalletCall = false;
-    let reverseStagedBeforeWalletCall = false;
     const call = vi.fn(async (circuitId: string, args: unknown[]) => {
       if (circuitId === 'convertToShielded') {
         stagedBeforeWalletCall = [...storage.values.values()].some((raw) => raw.includes('"status":"pending"'));
@@ -236,8 +238,6 @@ describe('frontend wallet transaction boundary', () => {
           color: Uint8Array.from({ length: 32 }, () => 0xab),
           value: 7n,
         };
-      } else if (circuitId === 'convertToUnshielded') {
-        reverseStagedBeforeWalletCall = [...storage.values.values()].some((raw) => raw.includes('"status":"pending"'));
       }
       return { private: { result: circuitId === 'convertToShielded' ? mintedCoin : undefined } };
     });
@@ -273,16 +273,9 @@ describe('frontend wallet transaction boundary', () => {
       coinStorage: storage,
     });
 
-    await expect(session.convert('toUnshielded', 7n)).rejects.toThrow('requires one exact sNight coin');
-    expect(call).not.toHaveBeenCalled();
     await session.convert('toShielded', 7n);
     expect(stagedBeforeWalletCall).toBe(true);
     expect(session.trackedWrapperCoins()).toEqual([mintedCoin!]);
-    await session.convert('toUnshielded', 7n);
-    expect(reverseStagedBeforeWalletCall).toBe(true);
-    const reverseArguments = call.mock.calls[1][1] as unknown[];
-    expect(reverseArguments[0]).toEqual(mintedCoin!);
-    expect(session.trackedWrapperCoins()).toEqual([]);
   });
 
   it('migrates valid legacy v1 coin records into the scoped store', () => {
@@ -384,20 +377,72 @@ describe('frontend wallet transaction boundary', () => {
     expect([...storage.values.values()].join('\n')).not.toContain('"status":"uncertain"');
   });
 
-  it('quarantines a real reverse coin when nested submission outcome is uncertain', async () => {
+  // Reverse conversion claims a contract-owned output that the wallet funds by
+  // ordinary coin selection over its sNight balance, so the browser's coin store
+  // is irrelevant to it. Proven on chain in
+  // test/integration/shielded-night.reverse-any-amount.test.ts.
+  it('reverses any amount the wallet holds with a fresh nonce and never reads the coin store', async () => {
     const storage = new MemoryStorage();
-    const wrapperColor = 'ab'.repeat(32);
-    const coin = {
-      nonce: Uint8Array.from({ length: 32 }, () => 6),
-      color: Uint8Array.from({ length: 32 }, () => 0xab),
-      value: 7n,
-    };
-    createWrapperCoinStore({
-      protocolFamily: 'midnight-2.x',
-      networkId: 'stagenet',
-      contractAddress: 'cd'.repeat(32),
-      storage,
-    }).add(coin);
+    const call = vi.fn(async (_circuitId: string, _args: unknown[]) => ({ private: { result: undefined } }));
+    const { session, wrapperColor } = await makeProtocolSession(storage, call);
+    expect(session.trackedWrapperCoins()).toEqual([]); // nothing this browser minted
+
+    await session.convert('toUnshielded', 5n); // wallet total is 7n
+    await session.convert('toUnshielded', 5n);
+
+    expect(call.mock.calls.map(([circuitId]) => circuitId)).toEqual(['convertToUnshielded', 'convertToUnshielded']);
+    const coins = call.mock.calls.map(([, args]) => args[0] as ShieldedCoinInfo);
+    for (const coin of coins) {
+      expect(coin.nonce).toBeInstanceOf(Uint8Array);
+      expect(coin.nonce.length).toBe(32);
+      expect(bytesToHex(coin.color)).toBe(wrapperColor);
+      expect(coin.value).toBe(5n);
+    }
+    // A fresh nonce per call: reusing one would reproduce a coin commitment.
+    expect(bytesToHex(coins[0].nonce)).not.toBe(bytesToHex(coins[1].nonce));
+    expect(call.mock.calls[0][1][1]).toEqual({
+      is_left: false,
+      left: { bytes: new Uint8Array(32) },
+      right: { bytes: new Uint8Array(32) },
+    });
+    // The store is untouched by the reverse path.
+    expect(session.wrapperCoinState()).toEqual({ available: [], blocked: [] });
+    expect([...storage.values.values()].join('\n')).not.toContain('"status":"pending"');
+  });
+
+  it('states base units and calls no circuit when the amount exceeds the balance', async () => {
+    const storage = new MemoryStorage();
+    const call = vi.fn(async (_circuitId: string, _args: unknown[]) => ({ private: { result: undefined } }));
+    const { session } = await makeProtocolSession(storage, call);
+
+    // The adapter has no decimals context, so it must not print a raw base-unit
+    // number as if it were sNight - the swap card formats before calling.
+    const error = await session.convert('toUnshielded', 8n).catch((caught) => caught);
+    expect(error.message).toBe(
+      "The requested amount (8 base units) exceeds the wallet's sNight balance (7 base units).",
+    );
+    expect(error).toMatchObject({ walletTotal: 7n, requested: 8n });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('logs nothing about approving in the wallet when the pre-check rejects the amount', async () => {
+    const storage = new MemoryStorage();
+    const call = vi.fn(async (_circuitId: string, _args: unknown[]) => ({ private: { result: undefined } }));
+    const { session } = await makeProtocolSession(storage, call);
+    const onStep = vi.fn();
+    const onLog = vi.fn();
+
+    await expect(session.convert('toUnshielded', 8n, { onStep, onLog })).rejects.toThrow('base units');
+
+    // A locally rejected amount never reached the wallet, so the activity log
+    // must not claim it did.
+    expect(onLog).not.toHaveBeenCalled();
+    expect(onStep).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the transaction id and warns against a blind retry when a reverse is uncertain', async () => {
+    const storage = new MemoryStorage();
     const identity = Object.assign(new Error('connector response lost'), {
       transactionId: 'nested-reverse-tx',
       networkId: 'stagenet',
@@ -405,12 +450,15 @@ describe('frontend wallet transaction boundary', () => {
     const wrapped = new Error('Midnight.js call failed', { cause: identity });
     const { session } = await makeProtocolSession(storage, async () => { throw wrapped; });
 
-    await expect(session.convert('toUnshielded', 7n)).rejects.toBe(wrapped);
-    expect(session.trackedWrapperCoins()).toEqual([]);
-    expect([...storage.values.values()].join('\n')).toContain('"transactionId":"nested-reverse-tx"');
+    const error = await session.convert('toUnshielded', 7n).catch((caught) => caught);
+    expect(error).toMatchObject({ transactionId: 'nested-reverse-tx', networkId: 'stagenet' });
+    expect(error.message).toContain('nested-reverse-tx');
+    expect(error.message).toContain('a blind retry converts more sNight');
+    expect(error.cause).toBe(wrapped);
+    expect(session.wrapperCoinState()).toEqual({ available: [], blocked: [] });
   });
 
-  it('restores a staged reverse coin after a known pre-submission cancellation', async () => {
+  it('leaves this browser’s minted coins untouched when the wallet cancels a reverse', async () => {
     const storage = new MemoryStorage();
     const coin = {
       nonce: Uint8Array.from({ length: 32 }, () => 7),
@@ -428,6 +476,7 @@ describe('frontend wallet transaction boundary', () => {
 
     await expect(session.convert('toUnshielded', 7n)).rejects.toBe(cancellation);
     expect(session.trackedWrapperCoins()).toEqual([coin]);
+    expect(session.wrapperCoinState().blocked).toEqual([]);
   });
 
   it('stages and retains the exact legacy withdrawal coin before completing resume', async () => {
