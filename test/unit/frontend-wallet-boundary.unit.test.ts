@@ -410,14 +410,34 @@ describe('frontend wallet transaction boundary', () => {
     expect([...storage.values.values()].join('\n')).not.toContain('"status":"pending"');
   });
 
-  it('reports the wallet total and calls no circuit when the amount exceeds the balance', async () => {
+  it('states base units and calls no circuit when the amount exceeds the balance', async () => {
     const storage = new MemoryStorage();
     const call = vi.fn(async (_circuitId: string, _args: unknown[]) => ({ private: { result: undefined } }));
     const { session } = await makeProtocolSession(storage, call);
 
-    await expect(session.convert('toUnshielded', 8n)).rejects.toThrow(
-      'The wallet holds 7 sNight; enter an amount up to that total.',
+    // The adapter has no decimals context, so it must not print a raw base-unit
+    // number as if it were sNight - the swap card formats before calling.
+    const error = await session.convert('toUnshielded', 8n).catch((caught) => caught);
+    expect(error.message).toBe(
+      "The requested amount (8 base units) exceeds the wallet's sNight balance (7 base units).",
     );
+    expect(error).toMatchObject({ walletTotal: 7n, requested: 8n });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it('logs nothing about approving in the wallet when the pre-check rejects the amount', async () => {
+    const storage = new MemoryStorage();
+    const call = vi.fn(async (_circuitId: string, _args: unknown[]) => ({ private: { result: undefined } }));
+    const { session } = await makeProtocolSession(storage, call);
+    const onStep = vi.fn();
+    const onLog = vi.fn();
+
+    await expect(session.convert('toUnshielded', 8n, { onStep, onLog })).rejects.toThrow('base units');
+
+    // A locally rejected amount never reached the wallet, so the activity log
+    // must not claim it did.
+    expect(onLog).not.toHaveBeenCalled();
+    expect(onStep).not.toHaveBeenCalled();
     expect(call).not.toHaveBeenCalled();
   });
 

@@ -311,18 +311,30 @@ export async function createProtocolSession(input: {
         callbacks.onLog?.(`Minted ${amount} sNight (single tx)`);
         return;
       }
-      callbacks.onStep?.('started', 'Converting sNight → NIGHT in one transaction…');
-      callbacks.onLog?.('convertToUnshielded — approve in wallet');
       // `convertToUnshielded` claims its coin as an output addressed to the
       // contract; the wallet funds that output from the sNight it holds, with
       // ordinary coin selection (inputs of that token type + change). The nonce
       // is ours to choose and need not match an owned coin, so any amount up to
       // the wallet's balance converts — including coins this browser never saw.
       // Proven on chain in test/integration/shielded-night.reverse-any-amount.test.ts.
+      //
+      // The check runs before any step/log callback: a locally rejected amount
+      // must not leave "approve in wallet" in the activity log.
       const walletTotal = pickBalance(await connectedAPI.getShieldedBalances(), [wrapperColorHex])?.value ?? 0n;
       if (amount > walletTotal) {
-        throw new Error(`The wallet holds ${walletTotal} sNight; enter an amount up to that total.`);
+        // Backstop for a stale UI balance — the swap card checks first and
+        // formats for display. This layer has no decimals context, so it says
+        // "base units" rather than printing a raw number as if it were sNight,
+        // and attaches both values for a caller that wants to format them.
+        throw Object.assign(
+          new Error(
+            `The requested amount (${amount} base units) exceeds the wallet's sNight balance (${walletTotal} base units).`,
+          ),
+          { walletTotal, requested: amount },
+        );
       }
+      callbacks.onStep?.('started', 'Converting sNight → NIGHT in one transaction…');
+      callbacks.onLog?.('convertToUnshielded — approve in wallet');
       const coin: ShieldedCoinInfo = {
         nonce: randomBytes32(),
         color: hexToBytes(wrapperColorHex),

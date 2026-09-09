@@ -55,6 +55,16 @@ export function SwapCard({ sn }: { sn: ShieldedNightState }) {
       return;
     }
 
+    // Reverse conversion is bounded by the wallet's sNight balance. Check it
+    // here so the message can be formatted in sNight (the adapter's own check
+    // is the authoritative backstop, but it only knows base units and would
+    // otherwise log "approve in wallet" for an amount we already know is too
+    // large).
+    if (direction === 'toUnshielded' && amt > walletWrapper) {
+      setLocalErr(`The wallet holds ${formatAmount(walletWrapper)} sNight; enter an amount up to that total.`);
+      return;
+    }
+
     setBusy(true);
     setStep('started');
     try {
