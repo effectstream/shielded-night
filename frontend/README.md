@@ -8,11 +8,13 @@ Install the app and both isolated protocol trees from the repository root:
 
 ```bash
 bun install --frozen-lockfile
-bun --cwd frontend install --frozen-lockfile
+bun --cwd=frontend install --frozen-lockfile
 npm --prefix frontend/protocols/v1 ci
 npm --prefix frontend/protocols/v2 ci
-bun --cwd frontend run dev
+bun --cwd=frontend run dev
 ```
+
+Use **bun 1.4 or newer**: the committed `bun.lock` files are lockfile v2, which older bun cannot read (`Unknown lockfile version`), and bun 1.4 requires the `--cwd=<dir>` spelling — written with a space it prints its usage text and exits 0 without installing or running anything. CI installs the latest bun.
 
 The development server listens on `http://localhost:5173`. The repository must contain the full v1 artifacts in `src/managed` and v2 artifacts in `contracts/v2/managed`.
 
@@ -42,11 +44,13 @@ Preview, Preprod and Stagenet are pinned to the ledger generation their chain ru
 | `midnight-2.x` | `Local (undeployed · 2.x)`, the v2 (ledger-v9) adapter |
 | anything else | the page reports the invalid value and blocks connecting; no silent fallback |
 
-It is read exactly like the contract addresses: baked in at `vite build` from the environment (the `UNDEPLOYED_` prefix in `vite.config.ts` exposes it), and overridable at runtime by `window.SHIELDED_NIGHT.UNDEPLOYED_PROTOCOL`. Values are trimmed and case-sensitive.
+It is read exactly like the contract addresses: baked in at `vite build` from the environment (the `UNDEPLOYED_` prefix in `vite.config.ts` exposes it), and overridable at runtime by `window.SHIELDED_NIGHT.UNDEPLOYED_PROTOCOL` (a non-blank runtime value wins; a blank one falls through to the build-time value). Values are trimmed and case-sensitive.
 
 ```bash
-UNDEPLOYED_PROTOCOL=midnight-2.x bun run build   # build-time
+UNDEPLOYED_PROTOCOL=midnight-2.x bun --cwd=frontend run build   # build-time, from the repository root
 ```
+
+The page is only one half of the switch: the contract it talks to has to come from the matching lane too, which is `MN_ENV=undeployed bun run deploy:v2` for `midnight-2.x` and `MN_ENV=undeployed bun run scripts/deploy.ts` for the 1.x default. The root [README](../README.md#which-lane-runs-where) has the table and the local 2.x recipe.
 
 The wallet never announces its own ledger generation, so a mismatch (a Midnight 1.x wallet on a `midnight-2.x` local network, or the reverse) can only fail once the adapter runs; the activity log then names the configured family and what to change.
 
@@ -97,9 +101,9 @@ An uncertain forward or reverse submission keeps the coin record quarantined wit
 ## Validation
 
 ```bash
-bun --cwd frontend run typecheck
-bun --cwd frontend run build
-bun run test:unit -- test/unit/frontend-wallet-boundary.unit.test.ts test/unit/runtime-config.unit.test.ts
+bun --cwd=frontend run typecheck
+bun --cwd=frontend run build
+bun run test:unit -- test/unit/frontend-wallet-boundary.unit.test.ts test/unit/networks-protocol.unit.test.ts test/unit/runtime-config.unit.test.ts
 ```
 
 CI additionally installs both protocol lockfiles on Linux, rebuilds both contract artifact trees with their pinned Compact compilers, checks byte-exact output and runs the Docker integration suite.

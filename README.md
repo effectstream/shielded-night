@@ -67,11 +67,17 @@ The frontend is a Vite + React app that connects to any `window.midnight` wallet
 
 ```bash
 bun install --frozen-lockfile
-bun --cwd frontend install --frozen-lockfile
+bun --cwd=frontend install --frozen-lockfile
 npm --prefix frontend/protocols/v1 ci
 npm --prefix frontend/protocols/v2 ci
-bun --cwd frontend run dev   # http://localhost:5173 (uses the committed .env)
+bun --cwd=frontend run dev   # http://localhost:5173 (uses the committed .env)
 ```
+
+Needs **bun 1.4 or newer**: the committed `bun.lock` files are lockfile v2, which
+older bun refuses to read (`Unknown lockfile version`), and bun 1.4 wants the
+`--cwd=<dir>` spelling — with a space it prints its usage text and exits 0
+without running anything. CI installs the latest bun, so the pinned form above
+is what CI runs.
 
 Needs a Midnight wallet extension, the v1 artifacts in `src/managed/`, and the v2 artifacts in `contracts/v2/managed/`. The two protocol installs remain separate because their ledger/runtime WASM generations cannot share class identities. Deploy details and the wallet-proving model are in [frontend/README.md](frontend/README.md).
 
@@ -92,6 +98,27 @@ MN_ENV=preview bun run scripts/deploy-and-lock.ts
 Two `.env` files, opposite policies: the root `.env` holds **secrets** and is
 gitignored; [frontend/.env](frontend/.env) holds only **public contract
 addresses** and is committed (the deployed address lives in git history).
+
+### Which lane runs where
+
+Two contract trees, two compilers, two sets of scripts. Which one a network uses
+is decided by the ledger generation that network runs — except `undeployed`,
+which is not a chain but whichever devnet is on the other end of the URLs you
+hand it:
+
+| Network | Ledger generation | Contract tree | Deploy / verify | The page |
+| --- | --- | --- | --- | --- |
+| `preview`, `preprod` | Midnight 1.x | root `src/` (compactc 0.31.1 → `src/managed/`) | `MN_ENV=preview bun run scripts/deploy.ts`, `bun run verify:deployment` | pinned 1.x |
+| `stagenet` | Midnight 2.x | `contracts/v2/` (compactc 0.34.0) | `MN_ENV=stagenet bun run deploy:v2`, `bun run verify:deployment:v2` — durable `MN_MAINTENANCE_KEY_FILE` mandatory | pinned 2.x |
+| `undeployed` (local devnet) | Midnight 1.x — **the default** | root `src/` | `MN_ENV=undeployed bun run scripts/deploy.ts`, `bun run verify:deployment` | `Local (undeployed)`, no setting needed |
+| `undeployed` (local devnet) | Midnight 2.x — **opt-in** | `contracts/v2/` | `MN_ENV=undeployed bun run deploy:v2`, `bun run verify:deployment:v2` — maintenance key optional | `UNDEPLOYED_PROTOCOL=midnight-2.x` → `Local (undeployed · 2.x)` |
+
+Nothing here changes by default: with no `MN_ENV` the v2 scripts still target
+`stagenet`, and with no `UNDEPLOYED_PROTOCOL` the page still treats the local
+network as Midnight 1.x. The 2.x local lane is opt-in on both sides, and both
+sides must agree — a page told `midnight-2.x` while the devnet is ledger-v8 (or
+the reverse) only fails when the adapter runs, and the activity log then names
+the configured family and what to change.
 
 ### Deploying the 2.x contract to Stagenet
 
@@ -128,7 +155,7 @@ docker run --rm \
 
 Wallet synchronization uses a five-minute timeout by default and then requires positive NIGHT and DUST balances before provider initialization or transaction construction. Set `MN_WALLET_SYNC_TIMEOUT_MS` to an integer from `30000` through `900000` when a slower indexer needs a different bounded wait.
 
-The deployer closes and read-back validates the key file before wallet startup, passes that exact key to Midnight.js, and verifies that its derived public key is the 1-of-1 on-chain maintenance authority. It then confirms the transaction, compares the circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-stagenet-<address>.json` by default. It does not lock the maintenance authority. Preserve the printed `STAGENET_ADDRESS` as public data in `frontend/.env`, then independently repeat the read-only verification:
+The deployer closes and read-back validates the key file before wallet startup, passes that exact key to Midnight.js, and verifies that its derived public key is the 1-of-1 on-chain maintenance authority. It then confirms the transaction, compares the circuit set and verifier keys with `contracts/v2/managed`, reports the maintenance-authority state, and writes a private record to `.local/deployments/v2-<env>-<address>.json` by default — `v2-stagenet-<address>.json` here, `v2-undeployed-<address>.json` for the local 2.x lane below (`DEPLOY_OUT=<path>` overrides the whole path). It does not lock the maintenance authority. The address is also printed as `<ENV>_ADDRESS=<address>`, so this run prints `STAGENET_ADDRESS=…`; preserve it as public data in `frontend/.env`, then independently repeat the read-only verification:
 
 ```bash
 MN_ENV=stagenet CV_ADDRESS=<deployed-address> bun run verify:deployment:v2
@@ -142,15 +169,16 @@ Everything above assumes the local devnet is on this host's loopback and that a
 human pastes the new address into `frontend/.env`. A deployment that brings up
 its OWN chain — a compose stack that deploys this contract once per bring-up and
 serves the dApp from an image built long before — needs neither assumption, and
-four opt-in knobs cover it. All default to today's behaviour, so nothing changes
+five opt-in knobs cover it. All default to today's behaviour, so nothing changes
 for an existing deploy, build or CI run.
 
 | Knob | Where | What it does |
 | --- | --- | --- |
-| `MN_INDEXER_URL`, `MN_INDEXER_WS_URL`, `MN_NODE_URL`, `MN_PROOF_SERVER_URL` | deploy / lock / verify scripts and the integration suite | dial a stack that is not on `127.0.0.1` — e.g. compose service hostnames from inside the same docker network. `undeployed` honours all four; hosted envs honour `MN_PROOF_SERVER_URL` only ([TESTING.md](TESTING.md)) |
-| `DEPLOY_OUT=<path>` | `scripts/deploy.ts`, `scripts/deploy-and-lock.ts` | also write the deploy as JSON — `{address, networkId, name, symbol, decimals, deployedAt, commit, locked}` — published atomically, so an automated deployment reads DATA instead of scraping stdout ([scripts/deploy-record.ts](scripts/deploy-record.ts)) |
-| `window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "…" }` | the SPA — overwrite the built `dist/config.js`, which `index.html` already loads before the bundle | override the built-in contract address at RUNTIME, so one image serves any stack; nothing else in the build is touched ([frontend/README.md](frontend/README.md#runtime-address-override-windowshielded_night)) |
-| `MN_EXTERNAL_STACK=1` | the integration suite | run the suite against that already-running stack instead of booting one with testcontainers — the strongest e2e gate a packaging of this dApp can have ([TESTING.md](TESTING.md)) |
+| `MN_INDEXER_URL`, `MN_INDEXER_WS_URL`, `MN_NODE_URL`, `MN_PROOF_SERVER_URL` — plus `MN_NODE_WS_URL` on the v2 lane | deploy / lock / verify scripts and the integration suite; the same names on the v2 scripts (`deploy:v2`, `verify:deployment:v2`) and the 2.x external-stack suite | dial a stack that is not on `127.0.0.1` — e.g. compose service hostnames from inside the same docker network. `undeployed` honours all four (five on the v2 lane); hosted envs honour `MN_PROOF_SERVER_URL` only ([TESTING.md](TESTING.md)) |
+| `DEPLOY_OUT=<path>` | `scripts/deploy.ts`, `scripts/deploy-and-lock.ts`; the v2 scripts honour it too, for their own provenance record | also write the deploy as JSON — `{address, networkId, name, symbol, decimals, deployedAt, commit, locked}` — published atomically, so an automated deployment reads DATA instead of scraping stdout ([scripts/deploy-record.ts](scripts/deploy-record.ts)) |
+| `window.SHIELDED_NIGHT = { UNDEPLOYED_ADDRESS: "…" }` | the SPA — overwrite the built `dist/config.js`, which `index.html` already loads before the bundle | override the built-in contract address at RUNTIME, so one image serves any stack; nothing else in the build is touched ([frontend/README.md](frontend/README.md#runtime-configuration-override)) |
+| `UNDEPLOYED_PROTOCOL` | the SPA — build-time env at `vite build`, or `window.SHIELDED_NIGHT.UNDEPLOYED_PROTOCOL` in that same `dist/config.js` (a non-blank runtime value wins) | which ledger generation the local `undeployed` network runs: `midnight-1.x` (the default, today's behaviour) or `midnight-2.x`, which loads the v2 (ledger-v9) adapter and labels the row `Local (undeployed · 2.x)`. Any other value is a visible configuration error on the page and Connect stays disabled — never a silent fallback ([frontend/README.md](frontend/README.md#local-protocol-selection-undeployed_protocol)) |
+| `MN_EXTERNAL_STACK=1` | the 1.x integration suite, and the 2.x round-trip suite (`bun run test:v2:external`, where it is mandatory) | run the suite against that already-running stack instead of booting one with testcontainers — the strongest e2e gate a packaging of this dApp can have ([TESTING.md](TESTING.md)) |
 
 ```bash
 # deploy into a compose stack, from a container on its network
@@ -166,6 +194,74 @@ MN_ENV=undeployed MN_SEED=<dedicated-deployer-seed> \
 On `undeployed` the deployer seed defaults to the genesis seed
 (`…0001`). Set `MN_SEED` to a dedicated one whenever anything else on that
 stack uses genesis — two facades on one wallet knock each other offline.
+
+#### When that local devnet is a Midnight 2.x chain
+
+Everything above is the 1.x lane. If the stack you brought up runs **Midnight
+2.x** (ledger-v9), use the v2 tree's commands instead — same knobs, same URLs,
+and `MN_ENV=undeployed` is what selects the lane (the v2 scripts default to
+`stagenet`, so nothing changes for the Stagenet deployment):
+
+```bash
+# 1 — deploy the compiler-0.34.0 contract onto the local 2.x chain
+MN_ENV=undeployed MN_SEED=<dedicated-deployer-seed> \
+  MN_NODE_URL=http://127.0.0.1:9944 \
+  MN_NODE_WS_URL=ws://127.0.0.1:9944 \
+  MN_INDEXER_URL=http://127.0.0.1:8088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://127.0.0.1:8088/api/v4/graphql/ws \
+  MN_PROOF_SERVER_URL=http://127.0.0.1:6300 \
+  bun run deploy:v2
+
+# 2 — verify what landed, read-only, from the address step 1 printed
+MN_ENV=undeployed CV_ADDRESS=<address> \
+  MN_INDEXER_URL=http://127.0.0.1:8088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://127.0.0.1:8088/api/v4/graphql/ws \
+  MN_NODE_URL=http://127.0.0.1:9944 \
+  bun run verify:deployment:v2
+
+# 3 — optional: drive the full round trip through that chain and contract
+MN_EXTERNAL_STACK=1 MN_ENV=undeployed MN_SEED=<dedicated-driver-seed> \
+  CV_ADDRESS=<address> \
+  MN_NODE_URL=http://127.0.0.1:9944 \
+  MN_NODE_WS_URL=ws://127.0.0.1:9944 \
+  MN_INDEXER_URL=http://127.0.0.1:8088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://127.0.0.1:8088/api/v4/graphql/ws \
+  MN_PROOF_SERVER_URL=http://127.0.0.1:6300 \
+  bun run test:v2:external
+```
+
+The loopback values above are the defaults; pass only the ones your stack moves
+(compose service hostnames from inside the network, a `pick-ports` block from
+outside). What the three steps leave behind:
+
+- Step 1 prints `UNDEPLOYED_ADDRESS=<address>` (the printed variable is
+  `<ENV>_ADDRESS`, so `STAGENET_ADDRESS=` on the Stagenet lane) and writes
+  `.local/deployments/v2-undeployed-<address>.json`. `DEPLOY_OUT=<path>`
+  redirects that record, exactly as on the 1.x lane.
+- The maintenance signing key is **optional here**. With no
+  `MN_MAINTENANCE_KEY_FILE` the deployer creates
+  `.local/private-state/v2-undeployed/maintenance-key.json` (mode 0600, recorded
+  `network: "undeployed"`); with the variable set, a relative path is accepted
+  and resolved against the working directory. A key created for one network is
+  refused on the other, and `stagenet` keeps its mandatory absolute path on
+  durable storage. `.local/` is gitignored in full.
+- Private state is per network (`shielded-night-v2-undeployed`), so a machine
+  that also deploys to Stagenet never mixes the two.
+- **`deploy:v2` always deploys a NEW contract.** There is no resume or join path
+  in it — exactly like the 1.x `scripts/deploy.ts`. Re-running it hands you a
+  second contract (harmless on a throwaway devnet, and on Stagenet it is why the
+  operator does not run it twice); what a re-run *does* reuse is the maintenance
+  key file. Resumability belongs to the caller: a compose entrypoint that reads
+  its own `contract.json` and joins the address already there, or
+  `verify:deployment:v2` to confirm an address you already have.
+- Seed order is `MN_MNEMONIC`, then `MN_SEED`, then — on `undeployed` only — the
+  genesis-1 devnet seed `…0001` with a printed warning. That seed is the local
+  stack's funding faucet and is shared with every other facade deployed there,
+  so pass `MN_SEED` for anything you keep. Step 3 spends from the seed it is
+  given and deploys contracts of its own: point it only at a throwaway devnet.
+- The page needs to be told too: `UNDEPLOYED_PROTOCOL=midnight-2.x` next to
+  `UNDEPLOYED_ADDRESS`, either baked in at `vite build` or injected into
+  `dist/config.js` at container start.
 
 ## Locking a 1.x contract
 
@@ -278,6 +374,21 @@ bun run compact && bun run test:integration   # docker stack: node + indexer + p
 ```
 
 Unit tests run every circuit against an in-memory context, including security and border cases for both the atomic and two-step paths. Integration tests deploy to a local stack and cover the full round trip both directions (atomic and two-step), negative paths, on-chain attack vectors (forged, inflated, and double-spent coins; nonce-replay minting; the solvency invariant), multi-party circulation, and the maintenance-authority lock.
+
+The 2.x tree has its own two tiers:
+
+```bash
+bun run test:v2            # chain-free unit tier for contracts/v2 (what CI runs)
+bun run test:v2:external   # opt-in round trip against a Midnight 2.x stack you already started
+```
+
+`test:v2:external` never boots or tears down a stack: `MN_EXTERNAL_STACK=1` is
+mandatory and its global setup refuses to run without it, then preflights the
+indexer, node and proof server and names the URL that is wrong. Give it the
+`MN_*_URL` block and `MN_ENV=undeployed` (its own default) as in the recipe
+above; `CV_ADDRESS` is optional and joins an existing deployment instead of
+deploying a fresh one. It asserts the 11-circuit verifier-key set plus the
+atomic and two-step round trips with exact balances ([TESTING.md](TESTING.md)).
 
 ## CI / CD
 

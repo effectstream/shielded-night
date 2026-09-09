@@ -8,11 +8,20 @@ reference suites:
 | Unit (simulator) | Every circuit against an in-memory `CircuitContext` | none | seconds |
 | Integration (docker) | Real deploys + balanced transactions via a genesis wallet | docker: node, indexer, proof server | minutes |
 
+The compiler-0.34.0 / ledger-v9 tree in `contracts/v2` mirrors both, one tier at
+a time: `bun run test:v2` is its chain-free unit tier (what CI runs) and
+`bun run test:v2:external` is its round-trip suite against a Midnight 2.x stack
+you already started — see [the 2.x lane's external-stack suite](#the-2x-lanes-external-stack-suite-contractsv2) below.
+
 ## Prerequisites
 
 - Node 22+ (vitest runs under Node; bun is the package manager)
+- bun 1.4 or newer — the committed `bun.lock` files are lockfile v2 and older
+  bun cannot read them, and `--cwd` needs its `=` form (`bun --cwd=frontend …`)
+  or bun 1.4 prints usage and exits 0 without running the command
 - `bun install`
-- The `compact` CLI (the scripts pin compiler `0.31.1`)
+- The `compact` CLI (the root scripts pin compiler `0.31.1`; the `contracts/v2`
+  tree pins `0.34.0`)
 - Docker running (integration tier only)
 
 ## Unit tests
@@ -186,6 +195,11 @@ MN_EXTERNAL_STACK=1 MN_ENV=undeployed \
   deploys a fresh contract with a maintenance key sampled for the run.
 - Global setup preflights the indexer/node/proof-server with a 10-second fetch
   and fails immediately naming the URL that is wrong.
+- The same five `MN_*_URL` variables steer `bun run deploy:v2` and
+  `bun run verify:deployment:v2` when `MN_ENV=undeployed`, so the suite and the
+  deployment it drives share one env block — the README's
+  [local 2.x recipe](README.md#when-that-local-devnet-is-a-midnight-2x-chain)
+  runs all three commands in order.
 
 What it asserts, against the chain:
 
