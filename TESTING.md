@@ -158,6 +158,58 @@ locks the transaction structure so the wallet can't attach the unshielded UTXO
 input that `receiveUnshielded` needs — deposits would fail with
 `BalanceCheckOverspend` (see README, "The balancing fix").
 
+### The 2.x lane's external-stack suite (`contracts/v2`)
+
+The compiler-0.34.0 / ledger-v9 tree has its own round-trip suite. It is the
+2.x counterpart of `MN_EXTERNAL_STACK=1` above, with one difference: there is no
+self-booting mode. This tree carries no 2.x compose file, so the suite **only**
+ever joins a stack you already started, and its global setup refuses to run
+without `MN_EXTERNAL_STACK`, naming the variable. Nothing is ever torn down.
+
+```bash
+MN_EXTERNAL_STACK=1 MN_ENV=undeployed \
+  MN_SEED=<funded devnet seed> \
+  MN_INDEXER_URL=http://127.0.0.1:8088/api/v4/graphql \
+  MN_INDEXER_WS_URL=ws://127.0.0.1:8088/api/v4/graphql/ws \
+  MN_NODE_URL=http://127.0.0.1:9944 \
+  MN_NODE_WS_URL=ws://127.0.0.1:9944 \
+  MN_PROOF_SERVER_URL=http://127.0.0.1:6300 \
+  bun run test:v2:external      # = npm --prefix contracts/v2 run test:external
+```
+
+- `MN_ENV` defaults to `undeployed` **here** (the deploy/verify scripts default
+  to `stagenet`); `stagenet` is accepted but then `MN_SEED` is mandatory.
+- `MN_SEED` is optional on `undeployed` only: without it the suite uses the
+  shared genesis-1 devnet seed and says so loudly. Pass a dedicated seed for
+  anything you keep.
+- `CV_ADDRESS` is optional. Set, the suite joins that deployment; unset, it
+  deploys a fresh contract with a maintenance key sampled for the run.
+- Global setup preflights the indexer/node/proof-server with a 10-second fetch
+  and fails immediately naming the URL that is wrong.
+
+What it asserts, against the chain:
+
+1. the deployed (or joined) contract serves the 11-circuit set with verifier
+   keys byte-equal to `contracts/v2/managed/keys/`, the release metadata
+   (`Shielded Night` / `sNight` / 6), and — for a contract it deployed itself —
+   the run's sampled key as the sole maintenance authority;
+2. the two-step round trip `depositUnshielded → withdrawShielded →
+   depositShielded → withdrawUnshielded`, with EXACT NIGHT and wrapper balances
+   after every step;
+3. the atomic pair `convertToShielded` / `convertToUnshielded` (the circuits the
+   SPA drives), again with exact balances;
+4. a wrong-secret withdrawal is refused with `no balance for this secret`, and
+   the rightful secret still redeems the credit.
+
+The suite deploys contracts and spends from the seed it is given: **point it
+only at a throwaway devnet.**
+
+The unit tier is unaffected. `bun run test:v2` runs
+`vitest --config contracts/v2/vitest.config.ts`, whose include pattern and
+exclude list both keep `test/external/**` out, so CI's `unit-v2` job never
+collects a test that needs a chain. There is no CI job for the 2.x external
+suite, exactly as there is none for the 1.x external mode.
+
 ## CI
 
 `.github/workflows/ci.yml`:
