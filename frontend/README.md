@@ -25,23 +25,43 @@ The development server listens on `http://localhost:5173`. The repository must c
 | `PREVIEW_ADDRESS` | Preview | Midnight 1.x |
 | `PREPROD_ADDRESS` | Preprod | Midnight 1.x |
 | `STAGENET_ADDRESS` | Stagenet | Midnight 2.x |
-| `UNDEPLOYED_ADDRESS` | Local (development only) | Midnight 1.x |
+| `UNDEPLOYED_ADDRESS` | Local (development only) | Midnight 1.x by default, 2.x with `UNDEPLOYED_PROTOCOL` |
 
 Preview, Preprod and Stagenet always appear. A missing or malformed address displays an unavailable state and blocks wallet connection and transactions. Local appears in development or when its address is explicitly configured.
 
 The wallet supplies its network, indexer and proving capabilities. The app verifies the wallet network throughout the operation and delegates proving, transaction balancing and submission to the wallet. It submits the exact balanced bytes returned by the wallet.
 
-### Runtime address override
+### Local protocol selection (`UNDEPLOYED_PROTOCOL`)
+
+Preview, Preprod and Stagenet are pinned to the ledger generation their chain runs. `undeployed` is not a chain but whichever devnet is on the other end, so its protocol family is a setting:
+
+| Value | Effect |
+| --- | --- |
+| unset (default) | `Local (undeployed)`, Midnight 1.x — today's behavior |
+| `midnight-1.x` | the same, stated explicitly |
+| `midnight-2.x` | `Local (undeployed · 2.x)`, the v2 (ledger-v9) adapter |
+| anything else | the page reports the invalid value and blocks connecting; no silent fallback |
+
+It is read exactly like the contract addresses: baked in at `vite build` from the environment (the `UNDEPLOYED_` prefix in `vite.config.ts` exposes it), and overridable at runtime by `window.SHIELDED_NIGHT.UNDEPLOYED_PROTOCOL`. Values are trimmed and case-sensitive.
+
+```bash
+UNDEPLOYED_PROTOCOL=midnight-2.x bun run build   # build-time
+```
+
+The wallet never announces its own ledger generation, so a mismatch (a Midnight 1.x wallet on a `midnight-2.x` local network, or the reverse) can only fail once the adapter runs; the activity log then names the configured family and what to change.
+
+### Runtime configuration override
 
 `index.html` loads `public/config.js` before the module bundle. A stack may replace its no-op value at container startup:
 
 ```js
 window.SHIELDED_NIGHT = {
+  UNDEPLOYED_PROTOCOL: "midnight-2.x",
   UNDEPLOYED_ADDRESS: "0123…",
 };
 ```
 
-The supported keys are `PREVIEW_ADDRESS`, `PREPROD_ADDRESS`, `STAGENET_ADDRESS` and `UNDEPLOYED_ADDRESS`. A non-blank runtime value wins over its build-time value. Only public addresses are injectable; secrets remain outside the frontend.
+The supported keys are `PREVIEW_ADDRESS`, `PREPROD_ADDRESS`, `STAGENET_ADDRESS`, `UNDEPLOYED_ADDRESS` and `UNDEPLOYED_PROTOCOL`. A non-blank runtime value wins over its build-time value; a blank one falls through to the build-time value. Only public addresses and that protocol switch are injectable; secrets remain outside the frontend.
 
 ## Protocol isolation
 
